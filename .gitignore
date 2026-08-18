@@ -1,0 +1,19 @@
+.DS_Store
+**/.DS_Store
+
+# STM32CubeIDE generated build directory
+Debug/
+
+# Local PDF builders and rendered QA pages
+tmp/
+
+# Keep release firmware, ignore intermediate objects/dependencies/tests
+build/*
+!build/tesla_charger.bin
+!build/tesla_charger.elf
+!build/tesla_charger.map
+
+# Superseded local reports; the current report remains tracked
+output/pdf/tesla_model_3_pcs_code_changes_and_troubleshooting.pdf
+output/pdf/tesla_model_3_pcs_diagnostic_analysis.pdf
+
