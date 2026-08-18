@@ -80,6 +80,14 @@ void PCS_Encode23D_US(uint8_t data[2], uint8_t currentLimitAmps)
   data[1] = 0x00U;
 }
 
+void PCS_Encode333(uint8_t data[4], uint8_t currentLimitAmps)
+{
+  data[0] = 0x04U;
+  data[1] = (currentLimitAmps > 0x7FU) ? 0x7FU : currentLimitAmps;
+  data[2] = 0x29U;
+  data[3] = 0x07U;
+}
+
 uint8_t PCS_Encode2B2(uint8_t data[5], uint16_t powerWatts, bool chargeEnabled, bool shortFrame)
 {
   data[0] = (uint8_t)(powerWatts & 0xFFU);
@@ -88,4 +96,22 @@ uint8_t PCS_Encode2B2(uint8_t data[5], uint16_t powerWatts, bool chargeEnabled, 
   data[3] = 0x00U;
   data[4] = 0x00U;
   return shortFrame ? 3U : 5U;
+}
+
+uint8_t PCS_ClampChargeCurrent(uint8_t requestedAmps, uint8_t maximumAmps)
+{
+  return (requestedAmps > maximumAmps) ? maximumAmps : requestedAmps;
+}
+
+uint16_t PCS_CalculateChargePowerTarget(uint8_t currentAmps, uint16_t acVolts,
+                                        uint16_t maximumWatts)
+{
+  uint32_t requestedWatts = (uint32_t)currentAmps * (uint32_t)acVolts;
+
+  if (requestedWatts > maximumWatts)
+  {
+    requestedWatts = maximumWatts;
+  }
+
+  return (uint16_t)requestedWatts;
 }

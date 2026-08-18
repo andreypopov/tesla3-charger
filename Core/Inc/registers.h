@@ -38,9 +38,10 @@ volatile _Bool upd_disp; //бит обновления дисплея
 
 volatile uint8_t t_buzzer;
 
-const _Bool USpcs=1;  //Этот блок снят с американской Tesla Model 3.
+/* Этот американский PCS экспериментально принимает длинный 0x2B2 (DLC 5). */
+const _Bool USpcs=0;
 
-uint16_t VOLTAGE_DCDC=1350;
+uint16_t VOLTAGE_DCDC=1400;
 
 uint8_t pcs_status=0;
 
@@ -61,14 +62,20 @@ uint8_t pcs_counter;
 uint8_t Count545;
 
 uint16_t CHGpwr=0;             //фактический CAN setpoint; запуск всегда с 0 W
-uint16_t CHGpwrTarget=3000; //безопасная диагностическая цель для первого запуска
+uint16_t CHGpwrTarget=0;       //вычисляется из CHGcurrentSetpointA и ACvolts
 uint16_t PCS_Power_Req;
 
 uint8_t mess[8]={0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00}; //заготовка отправки пакета
 
 uint8_t cell_SOC;
 
-uint8_t ACILim=16; //16A
+/*
+ * Главный регистр тока зарядки. Допустимый диапазон 0...16 A.
+ * Значение выше 16 A программно ограничивается до 16 A.
+ */
+volatile uint8_t CHGcurrentSetpointA=16;
+volatile uint8_t CHGcurrentAppliedA=16;
+uint8_t ACILim=16;
 uint16_t AClim;
 uint16_t ACamps;
 uint16_t ACpwr;

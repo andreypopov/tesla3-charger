@@ -35,6 +35,11 @@ void PCS_Encode13D(uint8_t data[6], uint8_t currentLimitAmps, bool chargeEnabled
 void PCS_Encode21D_US(uint8_t data[8], uint8_t currentLimitAmps);
 void PCS_Encode22A(uint8_t data[4], uint16_t hvVolts, bool dcdcEnabled, bool chargeEnabled);
 void PCS_Encode23D_US(uint8_t data[2], uint8_t currentLimitAmps);
+void PCS_Encode333(uint8_t data[4], uint8_t currentLimitAmps);
 uint8_t PCS_Encode2B2(uint8_t data[5], uint16_t powerWatts, bool chargeEnabled, bool shortFrame);
+
+uint8_t PCS_ClampChargeCurrent(uint8_t requestedAmps, uint8_t maximumAmps);
+uint16_t PCS_CalculateChargePowerTarget(uint8_t currentAmps, uint16_t acVolts,
+                                        uint16_t maximumWatts);
 
 #endif /* PCS_PROTOCOL_H */

@@ -49,6 +49,11 @@
 #define PCS_AC_STABLE_MS           1000U
 #define PCS_AC_DROP_MS             500U
 #define CHARGE_RAMP_STEP_W         10U   // Шаг плавного набора мощности заряда (Ваты)
+#define CHARGE_RAMP_DOWN_STEP_W    100U  // Снижение мощности быстрее повышения
+#define CHARGE_CURRENT_MAX_A       16U   // Аппаратный предел этой установки
+#define CHARGE_NOMINAL_AC_V        230U  // Подстановка только до первого валидного 0x264
+#define CHARGE_AC_MAX_V            260U  // Защита расчёта от ошибочного значения CAN
+#define CHARGE_POWER_MAX_W         4000U // Верхний предел запроса 0x2B2
 #define AUTO_CHARGE_FROM_AC        1U    // Нет charge port/EVSE: старт по реальному 0x264
 /* USER CODE END PD */
 
@@ -142,6 +147,8 @@ static void PCS_cksum_local(uint8_t *data, uint16_t id);
 static void control_step_100ms(void);
 static void sample_charge_button(void);
 static void update_auto_charge_request(_Bool acStartValid, _Bool acHoldValid);
+static void update_charge_setpoints(void);
+static _Bool ramp_charge_power(void);
 static void stop_charge(void);
 static void apply_output_state(void);
 void send_mes_10(void);
@@ -388,6 +395,48 @@ static void update_auto_charge_request(_Bool acStartValid, _Bool acHoldValid)
 #endif
 }
 
+static void update_charge_setpoints(void)
+{
+  uint16_t calculationVoltage = CHARGE_NOMINAL_AC_V;
+  uint8_t appliedCurrent = PCS_ClampChargeCurrent(CHGcurrentSetpointA,
+                                                   CHARGE_CURRENT_MAX_A);
+
+  if ((ACvolts >= PCS_AC_HOLD_MIN_V) && (ACvolts <= CHARGE_AC_MAX_V))
+  {
+    calculationVoltage = ACvolts;
+  }
+
+  CHGcurrentAppliedA = appliedCurrent;
+  ACILim = appliedCurrent;
+  CHGpwrTarget = PCS_CalculateChargePowerTarget(appliedCurrent,
+                                                calculationVoltage,
+                                                CHARGE_POWER_MAX_W);
+
+  /* Нулевой регистр означает немедленный безопасный запрос 0 W. */
+  if (appliedCurrent == 0U)
+  {
+    CHGpwr = 0U;
+  }
+}
+
+static _Bool ramp_charge_power(void)
+{
+  if (CHGpwr < CHGpwrTarget)
+  {
+    uint16_t nextPower = (uint16_t)(CHGpwr + CHARGE_RAMP_STEP_W);
+    CHGpwr = (nextPower > CHGpwrTarget) ? CHGpwrTarget : nextPower;
+  }
+  else if (CHGpwr > CHGpwrTarget)
+  {
+    uint16_t delta = (uint16_t)(CHGpwr - CHGpwrTarget);
+    CHGpwr = (delta > CHARGE_RAMP_DOWN_STEP_W)
+        ? (uint16_t)(CHGpwr - CHARGE_RAMP_DOWN_STEP_W)
+        : CHGpwrTarget;
+  }
+
+  return CHGpwr == CHGpwrTarget;
+}
+
 static void control_step_100ms(void)
 {
   uint32_t now = HAL_GetTick();
@@ -400,6 +449,7 @@ static void control_step_100ms(void)
   _Bool pcsStatusRecent = (last204Ms != 0U) && ((uint32_t)(now - last204Ms) < PCS_RX_TIMEOUT_MS);
   _Bool pcsFault = pcsStatusRecent && ((pcs_main_state == 8U) || (pcs_hv_charge_status == 3U));
 
+  update_charge_setpoints();
   sample_charge_button();
   update_auto_charge_request(acStartValid, acHoldValid);
   ac_w = acHoldValid;
@@ -431,27 +481,28 @@ static void control_step_100ms(void)
       break;
 
     case PCS_STATE_WAIT_READY:
-        	if (!chg_request)
-        	  {
-        	    stop_charge();
-        	    set_control_state(PCS_STATE_STANDBY);
-        	  }
-	        	  else if (pcsCommsRecent && hvValid && acStartValid && !pcsFault && elapsed_ms(stateEnteredMs, 500U))
-	        	  {
-	        	    chg_w = 1;
-	        	    apply_output_state();
-	        	    CHGpwr = 200;
-	        	    set_control_state(PCS_STATE_RAMP);
-	        	  }
-    	  else if (elapsed_ms(stateEnteredMs, PCS_READY_TIMEOUT_MS))
-    	  {
-    	    chg_request = 0;
-    	    stop_charge();
-	    	    if (!pcsCommsRecent)      { set_control_state(PCS_STATE_FAULT_CAN); }
-	    	    else if (!hvValid)        { set_control_state(PCS_STATE_FAULT_HV);  }
-	    	    else if (!acStartValid)   { set_control_state(PCS_STATE_FAULT_AC);  }
-	    	    else                      { set_control_state(PCS_STATE_FAULT_PCS); }
-	    	  }
+      if (!chg_request)
+      {
+        stop_charge();
+        set_control_state(PCS_STATE_STANDBY);
+      }
+      else if (pcsCommsRecent && hvValid && acStartValid && !pcsFault &&
+               elapsed_ms(stateEnteredMs, 500U))
+      {
+        chg_w = 1;
+        apply_output_state();
+        CHGpwr = 0;
+        set_control_state(PCS_STATE_RAMP);
+      }
+      else if (elapsed_ms(stateEnteredMs, PCS_READY_TIMEOUT_MS))
+      {
+        chg_request = 0;
+        stop_charge();
+        if (!pcsCommsRecent)      { set_control_state(PCS_STATE_FAULT_CAN); }
+        else if (!hvValid)        { set_control_state(PCS_STATE_FAULT_HV);  }
+        else if (!acStartValid)   { set_control_state(PCS_STATE_FAULT_AC);  }
+        else                      { set_control_state(PCS_STATE_FAULT_PCS); }
+      }
       break;
 
     case PCS_STATE_RAMP:
@@ -484,12 +535,7 @@ static void control_step_100ms(void)
         stop_charge();
         set_control_state(PCS_STATE_FAULT_AC);
       }
-      else if (CHGpwr < CHGpwrTarget)
-      {
-        uint16_t nextPower = (uint16_t)(CHGpwr + CHARGE_RAMP_STEP_W);
-        CHGpwr = (nextPower > CHGpwrTarget) ? CHGpwrTarget : nextPower;
-      }
-      else
+      else if (ramp_charge_power())
       {
         set_control_state(PCS_STATE_CHARGING);
       }
@@ -509,6 +555,11 @@ static void control_step_100ms(void)
         else if (!hvValid)        { set_control_state(PCS_STATE_FAULT_HV); }
         else if (!acHoldValid)    { set_control_state(PCS_STATE_FAULT_AC); }
         else                      { set_control_state(PCS_STATE_FAULT_PCS); }
+      }
+      else
+      {
+        /* Регистр можно менять во время зарядки в обе стороны. */
+        ramp_charge_power();
       }
       break;
 
@@ -689,18 +740,40 @@ void send_mes_10(void)
       controlState == PCS_STATE_RAMP || controlState == PCS_STATE_CHARGING);
   can_queue_frame(&header, buffer);
 
-  /* HVP PCS control: support mode (not discharge) plus real measured HV. */
+  /* Hardware-validated 0x22A variant from the working local firmware. */
   header.StdId = 0x22A;
-  header.DLC = 4;
-  PCS_Encode22A(buffer, HVvolts, dcdc_w != 0,
-      controlState == PCS_STATE_RAMP || controlState == PCS_STATE_CHARGING);
+  header.DLC = 8;
+  header.RTR = CAN_RTR_DATA;
+
+  for (uint8_t i = 0U; i < 8U; i++)
+  {
+    buffer[i] = 0x00U;
+  }
+
+  /* 0x0B00 = проверенный на этом PCS запрос precharge 281,6 В. */
+  buffer[0] = 0x00U;
+  buffer[1] = 0x0BU;
+
+  if (controlState == PCS_STATE_RAMP || controlState == PCS_STATE_CHARGING)
+  {
+    buffer[2] = 0x7DU;
+  }
+  else if (dcdc_w && chg_w) { buffer[2] = 0x7DU; }
+  else if (dcdc_w)          { buffer[2] = 0x79U; }
+  else if (chg_w)           { buffer[2] = 0x74U; }
+  else                      { buffer[2] = 0x70U; }
+
+  if (HVvolts > 50U)
+  {
+    buffer[3] = (uint8_t)((((HVvolts >> 8) & 0xFFU) << 4) |
+                          ((HVvolts & 0xFFU) >> 4));
+  }
+
   for (uint8_t i = 0U; i < 4U; i++)
   {
     dbg_tx22A[i] = buffer[i];
   }
   can_queue_frame(&header, buffer);
-
-
 
       // =========================================================================
         // 3. ОТПРАВКА ПАКЕТА 0x22D (DC-DC Control Profile)
@@ -877,10 +950,7 @@ void send_mes_100(void)
                   // =========================================================================
                   header.StdId = 0x333;
                   header.DLC = 4;
-                  buffer[0] = 0x04;
-                  buffer[1] = (ACILim > 0x7FU) ? 0x7FU : ACILim;
-                  buffer[2] = 0x29;
-                  buffer[3] = 0x07;
+                  PCS_Encode333(buffer, ACILim);
                   can_queue_frame(&header, buffer);
 
 
@@ -1147,8 +1217,8 @@ int main(void)
     dcdc_w = 1; dcdc_on;
     chg_w = 0; chg_off;
 
-    CHGpwrTarget = 3000; // ИСПРАВЛЕНИЕ: Задаем целевую мощность 3 кВт, чтобы рампе было куда расти!
-    CHGpwr = 0;          // Стартуем раструб строго с нуля
+    CHGpwr = 0;
+    update_charge_setpoints();
     Short2B2 = USpcs;    // US/older PCS starts with DLC=3; alert 0x424 can switch to DLC=5.
 
     buzzer_on; t_buzzer = 2;
@@ -1182,7 +1252,7 @@ int main(void)
     ILI9341_WriteString(0, 30, "PCS:", Font_11x18, ILI9341_WHITE, ILI9341_BLACK);
     ILI9341_WriteString(0, 50, "DC-DC:", Font_11x18, ILI9341_WHITE, ILI9341_BLACK);
     ILI9341_WriteString(0, 70, "CHARGER:", Font_11x18, ILI9341_WHITE, ILI9341_BLACK);
-    ILI9341_WriteString(0, 90, "AC limit=", Font_11x18, ILI9341_WHITE, ILI9341_BLACK);
+    ILI9341_WriteString(0, 90, "I set/PCS=", Font_11x18, ILI9341_WHITE, ILI9341_BLACK);
     ILI9341_WriteString(0, 110, "AC power=", Font_11x18, ILI9341_WHITE, ILI9341_BLACK);
     ILI9341_WriteString(0, 130, "AC volts=", Font_11x18, ILI9341_WHITE, ILI9341_BLACK);
     ILI9341_WriteString(0, 150, "AC amps=", Font_11x18, ILI9341_WHITE, ILI9341_BLACK);
@@ -1248,12 +1318,14 @@ int main(void)
           ILI9341_WriteString(160,0,"   %",Font_16x26,ILI9341_CYAN,ILI9341_BLACK);
           ILI9341_DrawChar(160,0,cell_SOC, Font_16x26, ILI9341_CYAN,ILI9341_BLACK);
 
-          ILI9341_WriteString(100,90,"   ", Font_11x18, ILI9341_WHITE,ILI9341_BLACK);
+          ILI9341_WriteString(110,90,"          ", Font_11x18, ILI9341_WHITE,ILI9341_BLACK);
           ILI9341_WriteString(100,110,"   ", Font_11x18, ILI9341_WHITE,ILI9341_BLACK);
           ILI9341_WriteString(100,130,"   ", Font_11x18, ILI9341_WHITE,ILI9341_BLACK);
           ILI9341_WriteString(100,150,"   ", Font_11x18, ILI9341_WHITE,ILI9341_BLACK);
 
-          ILI9341_DrawChar(100,90,AClim, Font_11x18, ILI9341_WHITE,ILI9341_BLACK);
+          ILI9341_DrawChar(110,90,CHGcurrentAppliedA, Font_11x18, ILI9341_WHITE,ILI9341_BLACK);
+          ILI9341_WriteString(150,90,"/", Font_11x18, ILI9341_WHITE,ILI9341_BLACK);
+          ILI9341_DrawChar(170,90,AClim, Font_11x18, ILI9341_WHITE,ILI9341_BLACK);
           ILI9341_DrawChar(100,110,ACpwr, Font_11x18, ILI9341_WHITE,ILI9341_BLACK);
           ILI9341_DrawChar(100,130,ACvolts, Font_11x18, ILI9341_WHITE,ILI9341_BLACK);
           ILI9341_DrawChar(100,150,ACamps, Font_11x18, ILI9341_WHITE,ILI9341_BLACK);

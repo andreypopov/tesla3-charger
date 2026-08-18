@@ -43,6 +43,24 @@ int main(void)
   assert(data[0] == 0x05U && data[1] == 0x20U && data[2] == 0xAAU);
   assert(data[3] == 0x1AU && data[4] == 0xFFU && data[5] == 0x02U);
 
+  PCS_Encode13D(data, 8U, true);
+  assert(data[1] == 0x10U);
+  PCS_Encode21D_US(data, 8U);
+  assert(data[1] == 0x10U && data[3] == 0x08U);
+  PCS_Encode23D_US(data, 8U);
+  assert(data[0] == 0x10U);
+  PCS_Encode333(data, 8U);
+  assert(data[0] == 0x04U && data[1] == 0x08U);
+  assert(data[2] == 0x29U && data[3] == 0x07U);
+
+  assert(PCS_ClampChargeCurrent(8U, 16U) == 8U);
+  assert(PCS_ClampChargeCurrent(16U, 16U) == 16U);
+  assert(PCS_ClampChargeCurrent(25U, 16U) == 16U);
+
+  assert(PCS_CalculateChargePowerTarget(8U, 220U, 4000U) == 1760U);
+  assert(PCS_CalculateChargePowerTarget(16U, 220U, 4000U) == 3520U);
+  assert(PCS_CalculateChargePowerTarget(16U, 260U, 4000U) == 4000U);
+
   puts("PCS protocol tests: OK");
   return 0;
 }
