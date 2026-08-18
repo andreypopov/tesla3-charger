@@ -23,6 +23,8 @@ verified at the PCS connector.
 - Removed the synthetic transmitted `0x2C4` that collided with PCS telemetry.
 - Added consistent 16 A US port emulation using `0x13D`, `0x21D`, `0x23D` and
   `0x25D`.
+- Added the runtime `CHGcurrentSetpointA` register (0...16 A), synchronized
+  current-limit frames and an AC-voltage-based `0x2B2` power request.
 - Added automatic start after stable AC is confirmed by the PCS.
 - Added CAN/HV/AC/PCS fault states and `0x424` alert diagnostics.
 - Added host-side protocol regression tests and a portable ARM Makefile.
@@ -44,16 +46,32 @@ Generated release files:
 - `build/tesla_charger.elf`
 - `build/tesla_charger.map`
 
-Verified size:
+Verified size (`text=44,456`, `data=128`, `bss=3,464`):
 
-- Flash: 44,140 / 65,536 bytes
+- Flash: 44,584 / 65,536 bytes
 - RAM: 3,592 / 20,480 bytes
 
 Current BIN SHA-256:
 
 ```text
-1b3204d3d8e02f81f05b1b728655b7b2b1a937704ddc88547d7fe2540248b8f0
+f0a925b6059145a2b3ba17f505fdc53ad7374d9cdf9acc25b4c3985f88ffab10
 ```
+
+## Flashing the correct image
+
+The tracked STM32CubeIDE launch configuration downloads
+`build/tesla_charger.elf`. It intentionally does not rebuild before launch, so
+run `make test && make -j4` first. Do not select `Debug/Tesla Charger.elf`:
+`Debug/` is an ignored CubeIDE output directory and may contain an older local
+firmware image.
+
+When flashing the BIN directly, use `build/tesla_charger.bin` at address
+`0x08000000` and enable post-write verification. The current firmware is easy
+to identify without trusting the file name:
+
+- the display contains `I set/PCS=`;
+- CAN `0x22A` has DLC 8 and starts with `00 0B`;
+- CAN `0x2B2` has DLC 5 for the current tested PCS configuration.
 
 ## Documentation
 
