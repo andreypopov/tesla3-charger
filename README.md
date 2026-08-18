@@ -1,10 +1,11 @@
-# Tesla Model 3 PCS controller (US)
+# Tesla Model 3 PCS controller (32 A single-phase)
 
-STM32F103 controller firmware for a Power Conversion System from a US Tesla
-Model 3. The controller communicates over IPC CAN at 500 kbit/s, keeps DCDC
-support active and emulates the US Type-1/NACS charge-port messages needed to
-request AC charging without a physical charge port, proximity input or EVSE
-pilot interface.
+STM32F103 controller firmware for a 32 A single-phase Tesla Model 3 Power
+Conversion System. The controller communicates over IPC CAN at 500 kbit/s,
+keeps DCDC support active and emulates the US Type-1/NACS charge-port messages
+needed to request AC charging without a physical charge port, proximity input
+or EVSE pilot interface. The tested unit requires the newer five-byte `0x2B2`;
+that frame length is a protocol-generation detail, not proof of PCS region.
 
 ## Important safety notice
 
@@ -36,6 +37,17 @@ verified at the PCS connector.
 - Added decoding of the PCS per-phase current request from `0x204`. The
   `I set/PCS` display now shows the commanded current and the current the PCS
   actually requests internally (for example `16/8`).
+- The `4.txt` capture proved the 32 A single-phase hardware variant derives its
+  active-phase request as `0x2B2 watts / AC volts / 2`. RC5 therefore applies a
+  factor of two only to the encoded `0x2B2` value for hardware variant 1, while
+  every live current limit remains capped at 16 A.
+- Added correct `0x2B4` DCDC rail decoding. The same capture reports 14.2 V and
+  12.1 A, proving DCDC was active even though the legacy `0x224` field was zero.
+- Added a CAN overcurrent guard: a fresh measured current more than 2 A above
+  the setpoint immediately disables CHG and latches control state 14. Hardware
+  overcurrent protection is still mandatory.
+- Replaced the misleading `USpcs` switch with the explicit
+  `PCS_2B2_START_SHORT` frame-format setting.
 - Added host-side protocol regression tests and a portable ARM Makefile.
 
 The original capture reports `0x204 = 78 00 00 FF 00 00 00 09`, which decodes
@@ -55,15 +67,15 @@ Generated release files:
 - `build/tesla_charger.elf`
 - `build/tesla_charger.map`
 
-Verified size (`text=44,836`, `data=128`, `bss=3,480`):
+Verified RC5 size (`text=45,772`, `data=128`, `bss=3,504`):
 
-- Flash: 44,964 / 65,536 bytes
-- RAM: 3,608 / 20,480 bytes
+- Flash: 45,900 / 65,536 bytes
+- RAM: 3,632 / 20,480 bytes
 
-Current BIN SHA-256:
+Current BIN SHA-256 (RC5):
 
 ```text
-41957406914a8227cebb314cf44411d900798c6b6f621b536d515f5a88ca7226
+24933c421e705a28747902569711d55bd612073f639d61a0e4948014adc55e4f
 ```
 
 ## Flashing the correct image
@@ -78,7 +90,7 @@ When flashing the BIN directly, use `build/tesla_charger.bin` at address
 `0x08000000` and enable post-write verification. The current firmware is easy
 to identify without trusting the file name:
 
-- the display header is `PCS RC4` and contains `I set/PCS=`;
+- the display header is `PCS RC5` and contains `I set/PCS=` and `P/CAN=`;
 - CAN `0x22A` has DLC 8 and starts with `00 0B`;
 - CAN `0x2B2` has DLC 5 for the current tested PCS configuration.
 
@@ -86,7 +98,7 @@ to identify without trusting the file name:
 
 - [`DEBUGGING.md`](DEBUGGING.md): settings, state codes, expected CAN frames,
   first-start procedure and trace-capture checklist.
-- [`output/pdf/tesla_model_3_pcs_can_fix_and_test_guide.pdf`](output/pdf/tesla_model_3_pcs_can_fix_and_test_guide.pdf): complete Russian PDF report.
+- [`output/pdf/tesla_model_3_pcs_can_fix_and_test_guide.pdf`](output/pdf/tesla_model_3_pcs_can_fix_and_test_guide.pdf): earlier Russian report. Per the current test workflow it has not yet been updated for RC5; `DEBUGGING.md` is authoritative.
 
 ## Protocol references
 

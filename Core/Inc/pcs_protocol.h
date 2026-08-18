@@ -33,8 +33,19 @@ typedef struct
   uint8_t powerDeciKw;
 } PCS_ChargeLineStatus;
 
+typedef struct
+{
+  uint16_t lvVoltageRaw;
+  uint16_t hvVoltageRaw;
+  uint16_t outputCurrentRaw;
+  uint16_t lvVoltageVolts;
+  uint16_t hvVoltageVolts;
+  uint16_t outputCurrentAmps;
+} PCS_DcdcRailStatus;
+
 void PCS_Decode204(const uint8_t data[8], PCS_ChargerStatus *status);
 void PCS_Decode264(const uint8_t data[6], PCS_ChargeLineStatus *status);
+void PCS_Decode2B4(const uint8_t data[5], PCS_DcdcRailStatus *status);
 
 void PCS_Encode13D(uint8_t data[6], uint8_t currentLimitAmps, bool chargeEnabled);
 void PCS_Encode21D_US(uint8_t data[8], uint8_t pilotCurrentAmps,
@@ -47,5 +58,10 @@ uint8_t PCS_Encode2B2(uint8_t data[5], uint16_t powerWatts, bool chargeEnabled, 
 uint8_t PCS_ClampChargeCurrent(uint8_t requestedAmps, uint8_t maximumAmps);
 uint16_t PCS_CalculateChargePowerTarget(uint8_t currentAmps, uint16_t acVolts,
                                         uint16_t maximumWatts);
+uint8_t PCS_ChargePowerMultiplierForHardwareVariant(uint8_t hardwareVariant);
+uint16_t PCS_ScaleChargePowerRequest(uint16_t desiredWatts, uint8_t multiplier,
+                                     uint16_t maximumCanWatts);
+bool PCS_IsChargeOverCurrent(uint16_t measuredAmps, uint8_t setpointAmps,
+                             uint8_t marginAmps);
 
 #endif /* PCS_PROTOCOL_H */

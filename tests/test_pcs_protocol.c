@@ -9,8 +9,10 @@ int main(void)
   const uint8_t charging204[8] = {0x66, 0x04, 0x03, 0xFF, 0x00, 0x00, 0x50, 0x09};
   const uint8_t captured264[6] = {0xC3, 0x19, 0x80, 0x00, 0x40, 0x01};
   const uint8_t charging264[6] = {0xD2, 0x19, 0x94, 0x12, 0xA0, 0x00};
+  const uint8_t charging2B4[5] = {0x6C, 0x31, 0x21, 0x79, 0x00};
   PCS_ChargerStatus charger;
   PCS_ChargeLineStatus line;
+  PCS_DcdcRailStatus dcdc;
   uint8_t data[8] = {0};
 
   PCS_Decode204(captured204, &charger);
@@ -41,6 +43,11 @@ int main(void)
   assert(line.currentRaw == 80U && line.currentAmps == 8U);
   assert(line.powerDeciKw == 18U);
   assert(line.currentLimitRaw == 160U && line.currentLimitAmps == 16U);
+
+  PCS_Decode2B4(charging2B4, &dcdc);
+  assert(dcdc.lvVoltageRaw == 364U && dcdc.lvVoltageVolts == 14U);
+  assert(dcdc.hvVoltageRaw == 2124U && dcdc.hvVoltageVolts == 311U);
+  assert(dcdc.outputCurrentRaw == 121U && dcdc.outputCurrentAmps == 12U);
 
   PCS_Encode22A(data, 319U, true, true);
   assert(data[0] == 0x00U && data[1] == 0x00U);
@@ -82,6 +89,21 @@ int main(void)
   assert(PCS_CalculateChargePowerTarget(8U, 220U, 4000U) == 1760U);
   assert(PCS_CalculateChargePowerTarget(16U, 220U, 4000U) == 3520U);
   assert(PCS_CalculateChargePowerTarget(16U, 260U, 4000U) == 4000U);
+
+  assert(PCS_ChargePowerMultiplierForHardwareVariant(0U) == 1U);
+  assert(PCS_ChargePowerMultiplierForHardwareVariant(1U) == 2U);
+  assert(PCS_ChargePowerMultiplierForHardwareVariant(2U) == 1U);
+  assert(PCS_ScaleChargePowerRequest(3472U, 2U, 8000U) == 6944U);
+  assert(PCS_Encode2B2(data, 6944U, true, false) == 5U);
+  assert(data[0] == 0x20U && data[1] == 0x1BU && data[2] == 0x02U);
+  assert(data[3] == 0x00U && data[4] == 0x00U);
+  assert(PCS_ScaleChargePowerRequest(4000U, 2U, 8000U) == 8000U);
+  assert(PCS_ScaleChargePowerRequest(500U, 1U, 8000U) == 500U);
+  assert(PCS_ScaleChargePowerRequest(5000U, 2U, 8000U) == 8000U);
+  assert(PCS_ScaleChargePowerRequest(500U, 0U, 8000U) == 500U);
+  assert(!PCS_IsChargeOverCurrent(18U, 16U, 2U));
+  assert(PCS_IsChargeOverCurrent(19U, 16U, 2U));
+  assert(!PCS_IsChargeOverCurrent(32U, 0U, 2U));
 
   puts("PCS protocol tests: OK");
   return 0;

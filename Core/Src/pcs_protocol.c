@@ -39,6 +39,25 @@ void PCS_Decode264(const uint8_t data[6], PCS_ChargeLineStatus *status)
   status->powerDeciKw = data[3];
 }
 
+void PCS_Decode2B4(const uint8_t data[5], PCS_DcdcRailStatus *status)
+{
+  uint32_t railWord = (uint32_t)data[0] |
+                      ((uint32_t)data[1] << 8) |
+                      ((uint32_t)data[2] << 16);
+
+  status->lvVoltageRaw = (uint16_t)(railWord & 0x03FFU);
+  status->hvVoltageRaw = (uint16_t)((railWord >> 10) & 0x0FFFU);
+  status->outputCurrentRaw =
+      (uint16_t)((((uint16_t)data[4] << 8) | data[3]) & 0x0FFFU);
+
+  /* DBC scales: LV 5/128 V, HV 75/512 V and current 0.1 A per bit. */
+  status->lvVoltageVolts =
+      (uint16_t)(((uint32_t)status->lvVoltageRaw * 5U + 64U) / 128U);
+  status->hvVoltageVolts =
+      (uint16_t)(((uint32_t)status->hvVoltageRaw * 75U + 256U) / 512U);
+  status->outputCurrentAmps = (uint16_t)((status->outputCurrentRaw + 5U) / 10U);
+}
+
 void PCS_Encode13D(uint8_t data[6], uint8_t currentLimitAmps, bool chargeEnabled)
 {
   /* Post-2020 CP charge-status format used by the reference controller. */
@@ -130,4 +149,40 @@ uint16_t PCS_CalculateChargePowerTarget(uint8_t currentAmps, uint16_t acVolts,
   }
 
   return (uint16_t)requestedWatts;
+}
+
+uint8_t PCS_ChargePowerMultiplierForHardwareVariant(uint8_t hardwareVariant)
+{
+  /*
+   * The 32 A single-phase PCS (variant 1) in captures 3.txt and 4.txt derives
+   * its active-phase current as 0x2B2 / AC voltage / 2. Other variants keep
+   * the standard 1 W/bit request used by the reference three-phase trace.
+   */
+  return (hardwareVariant == 1U) ? 2U : 1U;
+}
+
+uint16_t PCS_ScaleChargePowerRequest(uint16_t desiredWatts, uint8_t multiplier,
+                                     uint16_t maximumCanWatts)
+{
+  uint32_t canRequestWatts;
+
+  if (multiplier == 0U)
+  {
+    multiplier = 1U;
+  }
+
+  canRequestWatts = (uint32_t)desiredWatts * (uint32_t)multiplier;
+  if (canRequestWatts > maximumCanWatts)
+  {
+    canRequestWatts = maximumCanWatts;
+  }
+
+  return (uint16_t)canRequestWatts;
+}
+
+bool PCS_IsChargeOverCurrent(uint16_t measuredAmps, uint8_t setpointAmps,
+                             uint8_t marginAmps)
+{
+  uint16_t tripThreshold = (uint16_t)setpointAmps + (uint16_t)marginAmps;
+  return (setpointAmps > 0U) && (measuredAmps > tripThreshold);
 }

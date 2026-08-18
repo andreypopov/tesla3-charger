@@ -17,7 +17,7 @@ volatile uint8_t pcs_alert_matrix[PCS_ALERT_MATRIX_SIZE] = {0};
 volatile uint8_t PCS_AlertCnt = 0;
 volatile uint16_t AlertCANId = 0;
 volatile uint8_t AlertRxError = 0;
-volatile _Bool Short2B2 = true; //US PCS starts with the tested 3-byte 0x2B2 format
+volatile _Bool Short2B2 = false; //This newer PCS was captured with the 5-byte 0x2B2 format
 
 // Флаг-заменитель C++ параметров: 1 — логирование включено, 0 — выключено
 volatile uint8_t param_alert_log_enabled = 1;
@@ -37,9 +37,6 @@ volatile _Bool upd_disp; //бит обновления дисплея
 
 
 volatile uint8_t t_buzzer;
-
-/* Этот американский PCS экспериментально принимает длинный 0x2B2 (DLC 5). */
-const _Bool USpcs=0;
 
 uint16_t VOLTAGE_DCDC=1400;
 
@@ -61,8 +58,10 @@ _Bool mux3b2=true;
 uint8_t pcs_counter;
 uint8_t Count545;
 
-uint16_t CHGpwr=0;             //фактический CAN setpoint; запуск всегда с 0 W
-uint16_t CHGpwrTarget=0;       //вычисляется из CHGcurrentSetpointA и ACvolts
+uint16_t CHGpwr=0;             //текущий кодированный setpoint 0x2B2; старт всегда с 0 W
+uint16_t CHGpwrTarget=0;       //целевой кодированный setpoint 0x2B2
+uint16_t CHGdesiredPowerTargetW=0; //физическая цель: ток уставки x измеренное AC
+volatile uint8_t CHGpowerRequestMultiplier=1; //1 обычно, 2 для PCS HW variant 1
 uint16_t PCS_Power_Req;
 
 uint8_t mess[8]={0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00}; //заготовка отправки пакета
@@ -100,6 +99,11 @@ volatile uint8_t pcs_phase_c_request_deci_amps;
 volatile uint8_t pcs_ac_current_request_amps;
 volatile uint16_t ac_current_raw;
 volatile uint16_t ac_voltage_raw;
+volatile uint16_t dcdc_lv_voltage_raw;
+volatile uint16_t dcdc_hv_voltage_raw;
+volatile uint16_t dcdc_output_current_raw;
+volatile uint16_t dcdc_legacy_current_raw;
+volatile uint16_t charge_overcurrent_trip_count;
 volatile uint8_t pcs_alert_page;
 volatile uint8_t pcs_last_alert_id;
 volatile uint16_t pcs_alert_can_id;

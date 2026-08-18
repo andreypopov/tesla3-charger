@@ -50,14 +50,18 @@
 #define PCS_AC_DROP_MS             500U
 #define CHARGE_RAMP_STEP_W         10U   // Шаг плавного набора мощности заряда (Ваты)
 #define CHARGE_RAMP_DOWN_STEP_W    100U  // Снижение мощности быстрее повышения
-#define CHARGE_CURRENT_MAX_A       16U   // Аппаратный предел этой установки
+#define CHARGE_CURRENT_MAX_A       16U   // Жёсткий предел запроса этой прошивки
+#define CHARGE_OVERCURRENT_MARGIN_A 2U  // CAN guard; не заменяет автомат/предохранитель
 #define CHARGE_CABLE_CAPABILITY_A  32U   // Паспорт кабеля/US PCS, не команда тока
 #define CHARGE_UI_CAPABILITY_A     48U   // Штатный UI maximum из US-tested профиля
 #define CHARGE_NOMINAL_AC_V        230U  // Подстановка только до первого валидного 0x264
 #define CHARGE_AC_MAX_V            260U  // Защита расчёта от ошибочного значения CAN
-#define CHARGE_POWER_MAX_W         4000U // Верхний предел запроса 0x2B2
+#define CHARGE_PHYSICAL_POWER_MAX_W 4000U // Реальная цель остаётся не выше 16 А
+#define CHARGE_CAN_POWER_MAX_W     8000U // Верх кодированного 0x2B2 при компенсации x2
+#define CHARGE_VARIANT1_COMPENSATION 1U // 32A single-phase: PCS делит 0x2B2 на 2
+#define PCS_2B2_START_SHORT        0U    // Этот PCS требует новый формат DLC 5
 #define AUTO_CHARGE_FROM_AC        1U    // Нет charge port/EVSE: старт по реальному 0x264
-#define FIRMWARE_LABEL             "PCS RC4"
+#define FIRMWARE_LABEL             "PCS RC5"
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -83,7 +87,8 @@ typedef enum
   PCS_STATE_FAULT_CAN = 10,
   PCS_STATE_FAULT_HV = 11,
   PCS_STATE_FAULT_AC = 12,
-  PCS_STATE_FAULT_PCS = 13
+  PCS_STATE_FAULT_PCS = 13,
+  PCS_STATE_FAULT_OVERCURRENT = 14
 } PCS_ControlState;
 
 typedef struct
@@ -113,10 +118,12 @@ static volatile uint32_t lastPcsRxMs = 0;
 static volatile uint32_t last204Ms = 0;
 static volatile uint32_t last224Ms = 0;
 static volatile uint32_t last264Ms = 0;
+static volatile uint32_t last2B4Ms = 0;
 static volatile uint32_t last2C4Ms = 0;
 static volatile uint32_t rx204Count = 0;
 static volatile uint32_t rx224Count = 0;
 static volatile uint32_t rx264Count = 0;
+static volatile uint32_t rx2B4Count = 0;
 static volatile uint32_t rx2C4Count = 0;
 static uint32_t lastMailboxFreeMs = 0;
 
@@ -403,6 +410,7 @@ static void update_charge_setpoints(void)
   uint16_t calculationVoltage = CHARGE_NOMINAL_AC_V;
   uint8_t appliedCurrent = PCS_ClampChargeCurrent(CHGcurrentSetpointA,
                                                    CHARGE_CURRENT_MAX_A);
+  uint8_t powerMultiplier = 1U;
 
   if ((ACvolts >= PCS_AC_HOLD_MIN_V) && (ACvolts <= CHARGE_AC_MAX_V))
   {
@@ -411,9 +419,16 @@ static void update_charge_setpoints(void)
 
   CHGcurrentAppliedA = appliedCurrent;
   ACILim = appliedCurrent;
-  CHGpwrTarget = PCS_CalculateChargePowerTarget(appliedCurrent,
-                                                calculationVoltage,
-                                                CHARGE_POWER_MAX_W);
+  CHGdesiredPowerTargetW = PCS_CalculateChargePowerTarget(
+      appliedCurrent, calculationVoltage, CHARGE_PHYSICAL_POWER_MAX_W);
+
+#if CHARGE_VARIANT1_COMPENSATION
+  powerMultiplier = PCS_ChargePowerMultiplierForHardwareVariant(pcs_hw_variant);
+#endif
+  CHGpowerRequestMultiplier = powerMultiplier;
+  CHGpwrTarget = PCS_ScaleChargePowerRequest(CHGdesiredPowerTargetW,
+                                              powerMultiplier,
+                                              CHARGE_CAN_POWER_MAX_W);
 
   /* Нулевой регистр означает немедленный безопасный запрос 0 W. */
   if (appliedCurrent == 0U)
@@ -424,16 +439,21 @@ static void update_charge_setpoints(void)
 
 static _Bool ramp_charge_power(void)
 {
+  uint16_t multiplier = (CHGpowerRequestMultiplier == 0U)
+      ? 1U : CHGpowerRequestMultiplier;
+  uint16_t rampUpStep = (uint16_t)(CHARGE_RAMP_STEP_W * multiplier);
+  uint16_t rampDownStep = (uint16_t)(CHARGE_RAMP_DOWN_STEP_W * multiplier);
+
   if (CHGpwr < CHGpwrTarget)
   {
-    uint16_t nextPower = (uint16_t)(CHGpwr + CHARGE_RAMP_STEP_W);
+    uint16_t nextPower = (uint16_t)(CHGpwr + rampUpStep);
     CHGpwr = (nextPower > CHGpwrTarget) ? CHGpwrTarget : nextPower;
   }
   else if (CHGpwr > CHGpwrTarget)
   {
     uint16_t delta = (uint16_t)(CHGpwr - CHGpwrTarget);
-    CHGpwr = (delta > CHARGE_RAMP_DOWN_STEP_W)
-        ? (uint16_t)(CHGpwr - CHARGE_RAMP_DOWN_STEP_W)
+    CHGpwr = (delta > rampDownStep)
+        ? (uint16_t)(CHGpwr - rampDownStep)
         : CHGpwrTarget;
   }
 
@@ -451,8 +471,11 @@ static void control_step_100ms(void)
   _Bool acHoldValid = acRecent && (ACvolts >= PCS_AC_HOLD_MIN_V);
   _Bool pcsStatusRecent = (last204Ms != 0U) && ((uint32_t)(now - last204Ms) < PCS_RX_TIMEOUT_MS);
   _Bool pcsFault = pcsStatusRecent && ((pcs_main_state == 8U) || (pcs_hv_charge_status == 3U));
+  _Bool acOverCurrent;
 
   update_charge_setpoints();
+  acOverCurrent = acRecent && PCS_IsChargeOverCurrent(
+      ACamps, CHGcurrentAppliedA, CHARGE_OVERCURRENT_MARGIN_A);
   sample_charge_button();
   update_auto_charge_request(acStartValid, acHoldValid);
   ac_w = acHoldValid;
@@ -520,6 +543,13 @@ static void control_step_100ms(void)
         stop_charge();
         set_control_state(PCS_STATE_FAULT_CAN);
       }
+      else if (acOverCurrent)
+      {
+        chg_request = 0;
+        stop_charge();
+        charge_overcurrent_trip_count++;
+        set_control_state(PCS_STATE_FAULT_OVERCURRENT);
+      }
       else if (!hvValid)
       {
         chg_request = 0;
@@ -550,6 +580,13 @@ static void control_step_100ms(void)
         stop_charge();
         set_control_state(PCS_STATE_STANDBY);
       }
+      else if (acOverCurrent)
+      {
+        chg_request = 0;
+        stop_charge();
+        charge_overcurrent_trip_count++;
+        set_control_state(PCS_STATE_FAULT_OVERCURRENT);
+      }
       else if (!pcsCommsRecent || !hvValid || !acHoldValid || pcsFault)
       {
         chg_request = 0;
@@ -570,6 +607,7 @@ static void control_step_100ms(void)
     case PCS_STATE_FAULT_HV:
     case PCS_STATE_FAULT_AC:
     case PCS_STATE_FAULT_PCS:
+    case PCS_STATE_FAULT_OVERCURRENT:
       stop_charge();
       if (chg_request)
       {
@@ -621,8 +659,29 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *canHandle)
     rx224Count++;
     last224Ms = now;
     lastPcsRxMs = now;
-    DCDCamps = (uint16_t)((((uint16_t)RxData[3] << 8 | RxData[2]) & 0x0FFFU) / 10U);
+    dcdc_legacy_current_raw =
+        (((uint16_t)RxData[3] << 8) | RxData[2]) & 0x0FFFU;
+    if ((last2B4Ms == 0U) || ((uint32_t)(now - last2B4Ms) >= PCS_RX_TIMEOUT_MS))
+    {
+      DCDCamps = (uint16_t)((dcdc_legacy_current_raw + 5U) / 10U);
+    }
     pin_dcdc_status = RxData[6];
+  }
+
+  if ((RxHeader.StdId == 0x2B4U) && (RxHeader.DLC >= 5U))
+  {
+    PCS_DcdcRailStatus rail;
+    PCS_Decode2B4(RxData, &rail);
+
+    rx2B4Count++;
+    last2B4Ms = now;
+    lastPcsRxMs = now;
+    dcdc_lv_voltage_raw = rail.lvVoltageRaw;
+    dcdc_hv_voltage_raw = rail.hvVoltageRaw;
+    dcdc_output_current_raw = rail.outputCurrentRaw;
+    DCDCvolts = rail.lvVoltageVolts;
+    LVvolts = rail.lvVoltageVolts;
+    DCDCamps = rail.outputCurrentAmps;
   }
 
   /* 0x2C4 belongs to the PCS. Never transmit a synthetic frame with this ID. */
@@ -1255,7 +1314,7 @@ int main(void)
 
     CHGpwr = 0;
     update_charge_setpoints();
-    Short2B2 = USpcs;    // US/older PCS starts with DLC=3; alert 0x424 can switch to DLC=5.
+    Short2B2 = (PCS_2B2_START_SHORT != 0U);
 
     buzzer_on; t_buzzer = 2;
 
@@ -1296,7 +1355,7 @@ int main(void)
     ILI9341_WriteString(0, 190, "U hv=", Font_11x18, ILI9341_WHITE, ILI9341_BLACK);
     ILI9341_WriteString(0, 210, "U lv=", Font_11x18, ILI9341_WHITE, ILI9341_BLACK);
     ILI9341_WriteString(0, 230, "STATE=", Font_7x10, ILI9341_CYAN, ILI9341_BLACK);
-    ILI9341_WriteString(0, 245, "Pwrst=", Font_7x10, ILI9341_CYAN, ILI9341_BLACK);
+    ILI9341_WriteString(0, 245, "P/CAN=", Font_7x10, ILI9341_CYAN, ILI9341_BLACK);
     ILI9341_WriteString(0, 260, "RX=", Font_7x10, ILI9341_CYAN, ILI9341_BLACK);
     ILI9341_WriteString(120, 260, "ERR=", Font_7x10, ILI9341_CYAN, ILI9341_BLACK);
     ILI9341_WriteString(0, 275, "QOV=", Font_7x10, ILI9341_CYAN, ILI9341_BLACK);
@@ -1374,8 +1433,12 @@ int main(void)
 
 	          ILI9341_WriteString(55,230,"    ",Font_7x10,ILI9341_WHITE,ILI9341_BLACK);
 	          ILI9341_DrawChar(55,230,controlState, Font_7x10, ILI9341_WHITE,ILI9341_BLACK);
-	          ILI9341_WriteString(55,245,"     ",Font_7x10,ILI9341_WHITE,ILI9341_BLACK);
-	          ILI9341_DrawChar(55,245,CHGpwr, Font_7x10, ILI9341_WHITE,ILI9341_BLACK);
+	          ILI9341_WriteString(45,245,"                  ",Font_7x10,ILI9341_WHITE,ILI9341_BLACK);
+	          ILI9341_DrawChar(45,245,CHGdesiredPowerTargetW, Font_7x10, ILI9341_WHITE,ILI9341_BLACK);
+	          ILI9341_WriteString(78,245,"/",Font_7x10,ILI9341_WHITE,ILI9341_BLACK);
+	          ILI9341_DrawChar(87,245,CHGpwr, Font_7x10, ILI9341_WHITE,ILI9341_BLACK);
+	          ILI9341_WriteString(122,245,"x",Font_7x10,ILI9341_WHITE,ILI9341_BLACK);
+	          ILI9341_DrawChar(132,245,CHGpowerRequestMultiplier, Font_7x10, ILI9341_WHITE,ILI9341_BLACK);
 	          ILI9341_WriteString(25,260,"          ",Font_7x10,ILI9341_WHITE,ILI9341_BLACK);
 	          ILI9341_DrawChar(25,260,rxmess, Font_7x10, ILI9341_WHITE,ILI9341_BLACK);
 	          ILI9341_WriteString(150,260,"        ",Font_7x10,ILI9341_WHITE,ILI9341_BLACK);
