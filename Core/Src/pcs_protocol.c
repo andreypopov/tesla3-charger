@@ -11,9 +11,14 @@ void PCS_Decode204(const uint8_t data[8], PCS_ChargerStatus *status)
   status->mainState = data[0] & 0x0FU;
   status->hvChargeStatus = (data[0] >> 4) & 0x03U;
   status->gridConfig = (data[0] >> 6) & 0x03U;
+  status->instantAcPowerDeciKw = data[2];
+  status->maximumAcPowerDeciKw = data[3];
   status->phaseAEnabled = data[1] & 0x01U;
   status->phaseBEnabled = (data[1] >> 1) & 0x01U;
   status->phaseCEnabled = (data[1] >> 2) & 0x01U;
+  status->phaseACurrentRequestDeciAmps = data[4];
+  status->phaseBCurrentRequestDeciAmps = data[5];
+  status->phaseCCurrentRequestDeciAmps = data[6];
   status->pwmEnableLine = data[7] & 0x01U;
   status->shutdownRequest = (data[7] >> 1) & 0x03U;
   status->hardwareVariant = (data[7] >> 3) & 0x03U;
@@ -45,13 +50,17 @@ void PCS_Encode13D(uint8_t data[6], uint8_t currentLimitAmps, bool chargeEnabled
   data[5] = 0x02U;
 }
 
-void PCS_Encode21D_US(uint8_t data[8], uint8_t currentLimitAmps)
+void PCS_Encode21D_US(uint8_t data[8], uint8_t pilotCurrentAmps,
+                     uint8_t cableCurrentLimitAmps)
 {
-  /* US Type-1/NACS connected profile. Byte 1 is 0.5 A/bit; byte 3 is 1 A/bit. */
+  /*
+   * US Type-1/NACS connected profile. The pilot is the live charge limit;
+   * cableCurrentLimitAmps is the separate physical cable capability.
+   */
   data[0] = 0x5DU;
-  data[1] = half_amp_limit(currentLimitAmps);
+  data[1] = half_amp_limit(pilotCurrentAmps);
   data[2] = 0x00U;
-  data[3] = (currentLimitAmps > 0x7FU) ? 0x7FU : currentLimitAmps;
+  data[3] = (cableCurrentLimitAmps > 0x7FU) ? 0x7FU : cableCurrentLimitAmps;
   data[4] = 0x80U;
   data[5] = 0x00U;
   data[6] = 0x60U;
@@ -78,8 +87,8 @@ void PCS_Encode23D(uint8_t data[4], uint8_t currentLimitAmps, bool chargeEnabled
 {
   /*
    * Post-2020 CP charge status. The two-byte US frame belongs to older PCS
-   * firmware. On the captured 32 A PCS that layout coincides with CP_MIA and
-   * an 8 A fallback. This layout matches the working 2020 reference trace.
+   * firmware. The attached trace confirms this PCS accepts the four-byte
+   * layout; the remaining 8 A clamp must be diagnosed independently.
    */
   data[0] = chargeEnabled ? 0x05U : 0x0AU;
   data[1] = half_amp_limit(currentLimitAmps);

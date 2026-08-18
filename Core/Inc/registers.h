@@ -92,6 +92,12 @@ volatile uint8_t pcs_grid_config;
 volatile uint8_t pcs_pwm_enable_line;
 volatile uint8_t pcs_hw_variant;
 volatile uint8_t pcs_shutdown_request;
+volatile uint8_t pcs_instant_ac_power_deci_kw;
+volatile uint8_t pcs_max_ac_power_deci_kw;
+volatile uint8_t pcs_phase_a_request_deci_amps;
+volatile uint8_t pcs_phase_b_request_deci_amps;
+volatile uint8_t pcs_phase_c_request_deci_amps;
+volatile uint8_t pcs_ac_current_request_amps;
 volatile uint16_t ac_current_raw;
 volatile uint16_t ac_voltage_raw;
 volatile uint8_t pcs_alert_page;
@@ -106,6 +112,8 @@ volatile uint8_t dbg_tx22A[4];
 volatile uint8_t dbg_tx2B2[5];
 volatile uint8_t dbg_tx2B2_dlc;
 volatile uint8_t dbg_tx23D[4];
+volatile uint8_t dbg_tx21D[8];
+volatile uint8_t dbg_tx333[4];
 
 
 

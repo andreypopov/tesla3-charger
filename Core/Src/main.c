@@ -51,10 +51,13 @@
 #define CHARGE_RAMP_STEP_W         10U   // Шаг плавного набора мощности заряда (Ваты)
 #define CHARGE_RAMP_DOWN_STEP_W    100U  // Снижение мощности быстрее повышения
 #define CHARGE_CURRENT_MAX_A       16U   // Аппаратный предел этой установки
+#define CHARGE_CABLE_CAPABILITY_A  32U   // Паспорт кабеля/US PCS, не команда тока
+#define CHARGE_UI_CAPABILITY_A     48U   // Штатный UI maximum из US-tested профиля
 #define CHARGE_NOMINAL_AC_V        230U  // Подстановка только до первого валидного 0x264
 #define CHARGE_AC_MAX_V            260U  // Защита расчёта от ошибочного значения CAN
 #define CHARGE_POWER_MAX_W         4000U // Верхний предел запроса 0x2B2
 #define AUTO_CHARGE_FROM_AC        1U    // Нет charge port/EVSE: старт по реальному 0x264
+#define FIRMWARE_LABEL             "PCS RC4"
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -657,6 +660,28 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *canHandle)
     pcs_pwm_enable_line = status.pwmEnableLine;
     pcs_hw_variant = status.hardwareVariant;
     pcs_shutdown_request = status.shutdownRequest;
+    pcs_instant_ac_power_deci_kw = status.instantAcPowerDeciKw;
+    pcs_max_ac_power_deci_kw = status.maximumAcPowerDeciKw;
+    pcs_phase_a_request_deci_amps = status.phaseACurrentRequestDeciAmps;
+    pcs_phase_b_request_deci_amps = status.phaseBCurrentRequestDeciAmps;
+    pcs_phase_c_request_deci_amps = status.phaseCCurrentRequestDeciAmps;
+
+    /* Single-phase US PCS normally enables phase C; retain generic fallback. */
+    if (status.phaseCEnabled)
+    {
+      pcs_ac_current_request_amps =
+          (uint8_t)((status.phaseCCurrentRequestDeciAmps + 5U) / 10U);
+    }
+    else if (status.phaseBEnabled)
+    {
+      pcs_ac_current_request_amps =
+          (uint8_t)((status.phaseBCurrentRequestDeciAmps + 5U) / 10U);
+    }
+    else
+    {
+      pcs_ac_current_request_amps =
+          (uint8_t)((status.phaseACurrentRequestDeciAmps + 5U) / 10U);
+    }
     pcs_status = status.mainState;
     pin_chg_status = status.pwmEnableLine;
   }
@@ -950,7 +975,11 @@ void send_mes_100(void)
                   // =========================================================================
                   header.StdId = 0x333;
                   header.DLC = 4;
-                  PCS_Encode333(buffer, ACILim);
+                  PCS_Encode333(buffer, CHARGE_UI_CAPABILITY_A);
+                  for (uint8_t i = 0U; i < 4U; i++)
+                  {
+                    dbg_tx333[i] = buffer[i];
+                  }
                   can_queue_frame(&header, buffer);
 
 
@@ -1079,7 +1108,11 @@ void send_mes_100(void)
     /* Tested US Type-1/NACS connected profile. 0x60 is not a 60 Hz field. */
     header.StdId = 0x21D;
     header.DLC = 8;
-    PCS_Encode21D_US(buffer, ACILim);
+    PCS_Encode21D_US(buffer, ACILim, CHARGE_CABLE_CAPABILITY_A);
+    for (uint8_t i = 0U; i < 8U; i++)
+    {
+      dbg_tx21D[i] = buffer[i];
+    }
     can_queue_frame(&header, buffer);
 
 
@@ -1251,7 +1284,7 @@ int main(void)
 
     /* Infinite loop */
     /* USER CODE BEGIN WHILE */
-    ILI9341_WriteString(90, 0, "PCS", Font_16x26, ILI9341_GREEN, ILI9341_BLACK);
+    ILI9341_WriteString(70, 0, FIRMWARE_LABEL, Font_16x26, ILI9341_GREEN, ILI9341_BLACK);
     ILI9341_WriteString(0, 30, "PCS:", Font_11x18, ILI9341_WHITE, ILI9341_BLACK);
     ILI9341_WriteString(0, 50, "DC-DC:", Font_11x18, ILI9341_WHITE, ILI9341_BLACK);
     ILI9341_WriteString(0, 70, "CHARGER:", Font_11x18, ILI9341_WHITE, ILI9341_BLACK);
@@ -1328,7 +1361,7 @@ int main(void)
 
           ILI9341_DrawChar(110,90,CHGcurrentAppliedA, Font_11x18, ILI9341_WHITE,ILI9341_BLACK);
           ILI9341_WriteString(150,90,"/", Font_11x18, ILI9341_WHITE,ILI9341_BLACK);
-          ILI9341_DrawChar(170,90,AClim, Font_11x18, ILI9341_WHITE,ILI9341_BLACK);
+          ILI9341_DrawChar(170,90,pcs_ac_current_request_amps, Font_11x18, ILI9341_WHITE,ILI9341_BLACK);
           ILI9341_DrawChar(100,110,ACpwr, Font_11x18, ILI9341_WHITE,ILI9341_BLACK);
           ILI9341_DrawChar(100,130,ACvolts, Font_11x18, ILI9341_WHITE,ILI9341_BLACK);
           ILI9341_DrawChar(100,150,ACamps, Font_11x18, ILI9341_WHITE,ILI9341_BLACK);

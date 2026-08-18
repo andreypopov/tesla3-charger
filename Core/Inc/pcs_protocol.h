@@ -9,9 +9,14 @@ typedef struct
   uint8_t mainState;
   uint8_t hvChargeStatus;
   uint8_t gridConfig;
+  uint8_t instantAcPowerDeciKw;
+  uint8_t maximumAcPowerDeciKw;
   uint8_t phaseAEnabled;
   uint8_t phaseBEnabled;
   uint8_t phaseCEnabled;
+  uint8_t phaseACurrentRequestDeciAmps;
+  uint8_t phaseBCurrentRequestDeciAmps;
+  uint8_t phaseCCurrentRequestDeciAmps;
   uint8_t pwmEnableLine;
   uint8_t shutdownRequest;
   uint8_t hardwareVariant;
@@ -32,7 +37,8 @@ void PCS_Decode204(const uint8_t data[8], PCS_ChargerStatus *status);
 void PCS_Decode264(const uint8_t data[6], PCS_ChargeLineStatus *status);
 
 void PCS_Encode13D(uint8_t data[6], uint8_t currentLimitAmps, bool chargeEnabled);
-void PCS_Encode21D_US(uint8_t data[8], uint8_t currentLimitAmps);
+void PCS_Encode21D_US(uint8_t data[8], uint8_t pilotCurrentAmps,
+                     uint8_t cableCurrentLimitAmps);
 void PCS_Encode22A(uint8_t data[4], uint16_t hvVolts, bool dcdcEnabled, bool chargeEnabled);
 void PCS_Encode23D(uint8_t data[4], uint8_t currentLimitAmps, bool chargeEnabled);
 void PCS_Encode333(uint8_t data[4], uint8_t currentLimitAmps);
