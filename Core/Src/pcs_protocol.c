@@ -58,6 +58,24 @@ void PCS_Decode2B4(const uint8_t data[5], PCS_DcdcRailStatus *status)
   status->outputCurrentAmps = (uint16_t)((status->outputCurrentRaw + 5U) / 10U);
 }
 
+bool PCS_Decode76CChargePhase(const uint8_t data[8], PCS_ChargePhaseDebug *status)
+{
+  uint8_t phaseIndex;
+
+  if (data[0] == 0x0CU)      { phaseIndex = 0U; }
+  else if (data[0] == 0x16U) { phaseIndex = 1U; }
+  else if (data[0] == 0x20U) { phaseIndex = 2U; }
+  else                       { return false; }
+
+  status->muxId = data[0];
+  status->phaseIndex = phaseIndex;
+  status->currentRaw = (((uint16_t)data[2] << 8) | data[1]) & 0x03FFU;
+  /* Reference controller scale: 0.0025 A/bit, retained as rounded mA. */
+  status->currentMilliAmps =
+      (uint16_t)(((uint32_t)status->currentRaw * 5U + 1U) / 2U);
+  return true;
+}
+
 void PCS_Encode13D(uint8_t data[6], uint8_t currentLimitAmps, bool chargeEnabled)
 {
   /* Post-2020 CP charge-status format used by the reference controller. */
@@ -69,14 +87,15 @@ void PCS_Encode13D(uint8_t data[6], uint8_t currentLimitAmps, bool chargeEnabled
   data[5] = 0x02U;
 }
 
-void PCS_Encode21D_US(uint8_t data[8], uint8_t pilotCurrentAmps,
-                     uint8_t cableCurrentLimitAmps)
+void PCS_Encode21D(uint8_t data[8], uint8_t pilotCurrentAmps,
+                   uint8_t cableCurrentLimitAmps, PCS_ChargePortProfile profile)
 {
   /*
-   * US Type-1/NACS connected profile. The pilot is the live charge limit;
-   * cableCurrentLimitAmps is the separate physical cable capability.
+   * 0x2D is the valid EU line-charge pilot profile used by the newer reference
+   * controller. 0x5D preserves the older US Type-1/NACS connected profile.
+   * The pilot is the live limit; byte 3 is only the cable capability.
    */
-  data[0] = 0x5DU;
+  data[0] = (profile == PCS_CHARGE_PORT_EU) ? 0x2DU : 0x5DU;
   data[1] = half_amp_limit(pilotCurrentAmps);
   data[2] = 0x00U;
   data[3] = (cableCurrentLimitAmps > 0x7FU) ? 0x7FU : cableCurrentLimitAmps;
@@ -115,6 +134,19 @@ void PCS_Encode23D(uint8_t data[4], uint8_t currentLimitAmps, bool chargeEnabled
   data[3] = 0x0FU;
 }
 
+void PCS_Encode25D(uint8_t data[8], PCS_ChargePortProfile profile)
+{
+  /* CP_type in the low two bits: 0 = US Tesla, 1 = Euro IEC. */
+  data[0] = (profile == PCS_CHARGE_PORT_EU) ? 0xD9U : 0xD8U;
+  data[1] = 0x8CU;
+  data[2] = 0x01U;
+  data[3] = 0xB5U;
+  data[4] = 0x4AU;
+  data[5] = 0xC1U;
+  data[6] = 0x0AU;
+  data[7] = 0xE0U;
+}
+
 void PCS_Encode333(uint8_t data[4], uint8_t currentLimitAmps)
 {
   data[0] = 0x04U;
@@ -149,35 +181,6 @@ uint16_t PCS_CalculateChargePowerTarget(uint8_t currentAmps, uint16_t acVolts,
   }
 
   return (uint16_t)requestedWatts;
-}
-
-uint8_t PCS_ChargePowerMultiplierForHardwareVariant(uint8_t hardwareVariant)
-{
-  /*
-   * The 32 A single-phase PCS (variant 1) in captures 3.txt and 4.txt derives
-   * its active-phase current as 0x2B2 / AC voltage / 2. Other variants keep
-   * the standard 1 W/bit request used by the reference three-phase trace.
-   */
-  return (hardwareVariant == 1U) ? 2U : 1U;
-}
-
-uint16_t PCS_ScaleChargePowerRequest(uint16_t desiredWatts, uint8_t multiplier,
-                                     uint16_t maximumCanWatts)
-{
-  uint32_t canRequestWatts;
-
-  if (multiplier == 0U)
-  {
-    multiplier = 1U;
-  }
-
-  canRequestWatts = (uint32_t)desiredWatts * (uint32_t)multiplier;
-  if (canRequestWatts > maximumCanWatts)
-  {
-    canRequestWatts = maximumCanWatts;
-  }
-
-  return (uint16_t)canRequestWatts;
 }
 
 bool PCS_IsChargeOverCurrent(uint16_t measuredAmps, uint8_t setpointAmps,

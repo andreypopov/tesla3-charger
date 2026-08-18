@@ -52,16 +52,15 @@
 #define CHARGE_RAMP_DOWN_STEP_W    100U  // Снижение мощности быстрее повышения
 #define CHARGE_CURRENT_MAX_A       16U   // Жёсткий предел запроса этой прошивки
 #define CHARGE_OVERCURRENT_MARGIN_A 2U  // CAN guard; не заменяет автомат/предохранитель
-#define CHARGE_CABLE_CAPABILITY_A  32U   // Паспорт кабеля/US PCS, не команда тока
-#define CHARGE_UI_CAPABILITY_A     48U   // Штатный UI maximum из US-tested профиля
+#define CHARGE_CABLE_CAPABILITY_A  32U   // Паспорт кабеля, не команда тока
+#define CHARGE_UI_CAPABILITY_A     48U   // UI capability из эталонного профиля
 #define CHARGE_NOMINAL_AC_V        230U  // Подстановка только до первого валидного 0x264
 #define CHARGE_AC_MAX_V            260U  // Защита расчёта от ошибочного значения CAN
 #define CHARGE_PHYSICAL_POWER_MAX_W 4000U // Реальная цель остаётся не выше 16 А
-#define CHARGE_CAN_POWER_MAX_W     8000U // Верх кодированного 0x2B2 при компенсации x2
-#define CHARGE_VARIANT1_COMPENSATION 1U // 32A single-phase: PCS делит 0x2B2 на 2
+#define PCS_CHARGE_PORT_PROFILE    PCS_CHARGE_PORT_EU // RC6: Euro IEC, менять только без AC
 #define PCS_2B2_START_SHORT        0U    // Этот PCS требует новый формат DLC 5
 #define AUTO_CHARGE_FROM_AC        1U    // Нет charge port/EVSE: старт по реальному 0x264
-#define FIRMWARE_LABEL             "PCS RC5"
+#define FIRMWARE_LABEL             "PCS RC6 EU"
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -298,7 +297,7 @@ void get_HV(void)
 
 }
 
-void PCS_Send_Power_Request_US(uint16_t power_watts, uint8_t chg_active)
+void PCS_Send_Power_Request(uint16_t power_watts, uint8_t chg_active)
 {
   CAN_TxHeaderTypeDef header = {0};
   uint8_t local_pwr_buffer[5] = {0};
@@ -410,7 +409,6 @@ static void update_charge_setpoints(void)
   uint16_t calculationVoltage = CHARGE_NOMINAL_AC_V;
   uint8_t appliedCurrent = PCS_ClampChargeCurrent(CHGcurrentSetpointA,
                                                    CHARGE_CURRENT_MAX_A);
-  uint8_t powerMultiplier = 1U;
 
   if ((ACvolts >= PCS_AC_HOLD_MIN_V) && (ACvolts <= CHARGE_AC_MAX_V))
   {
@@ -421,14 +419,8 @@ static void update_charge_setpoints(void)
   ACILim = appliedCurrent;
   CHGdesiredPowerTargetW = PCS_CalculateChargePowerTarget(
       appliedCurrent, calculationVoltage, CHARGE_PHYSICAL_POWER_MAX_W);
-
-#if CHARGE_VARIANT1_COMPENSATION
-  powerMultiplier = PCS_ChargePowerMultiplierForHardwareVariant(pcs_hw_variant);
-#endif
-  CHGpowerRequestMultiplier = powerMultiplier;
-  CHGpwrTarget = PCS_ScaleChargePowerRequest(CHGdesiredPowerTargetW,
-                                              powerMultiplier,
-                                              CHARGE_CAN_POWER_MAX_W);
+  CHGpowerRequestMultiplier = 1U;
+  CHGpwrTarget = CHGdesiredPowerTargetW;
 
   /* Нулевой регистр означает немедленный безопасный запрос 0 W. */
   if (appliedCurrent == 0U)
@@ -439,10 +431,8 @@ static void update_charge_setpoints(void)
 
 static _Bool ramp_charge_power(void)
 {
-  uint16_t multiplier = (CHGpowerRequestMultiplier == 0U)
-      ? 1U : CHGpowerRequestMultiplier;
-  uint16_t rampUpStep = (uint16_t)(CHARGE_RAMP_STEP_W * multiplier);
-  uint16_t rampDownStep = (uint16_t)(CHARGE_RAMP_DOWN_STEP_W * multiplier);
+  uint16_t rampUpStep = CHARGE_RAMP_STEP_W;
+  uint16_t rampDownStep = CHARGE_RAMP_DOWN_STEP_W;
 
   if (CHGpwr < CHGpwrTarget)
   {
@@ -725,7 +715,7 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *canHandle)
     pcs_phase_b_request_deci_amps = status.phaseBCurrentRequestDeciAmps;
     pcs_phase_c_request_deci_amps = status.phaseCCurrentRequestDeciAmps;
 
-    /* Single-phase US PCS normally enables phase C; retain generic fallback. */
+    /* This single-phase PCS enables phase C; retain a generic fallback. */
     if (status.phaseCEnabled)
     {
       pcs_ac_current_request_amps =
@@ -743,6 +733,30 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *canHandle)
     }
     pcs_status = status.mainState;
     pin_chg_status = status.pwmEnableLine;
+  }
+
+  if ((RxHeader.StdId == 0x76CU) && (RxHeader.DLC >= 8U))
+  {
+    PCS_ChargePhaseDebug phase;
+
+    rx76CCount++;
+    lastPcsRxMs = now;
+    pcs_debug_mux76c = RxData[0];
+    if (PCS_Decode76CChargePhase(RxData, &phase))
+    {
+      uint8_t index = phase.phaseIndex;
+      pcs_charge_phase_current_raw[index] = phase.currentRaw;
+      pcs_charge_phase_current_milliamps[index] = phase.currentMilliAmps;
+      rx76CPhaseCount[index]++;
+      for (uint8_t i = 0U; i < 8U; i++)
+      {
+        dbg_rx76C_phase[index][i] = RxData[i];
+      }
+      pcs_charge_phase_current_total_milliamps =
+          (uint16_t)(pcs_charge_phase_current_milliamps[0] +
+                     pcs_charge_phase_current_milliamps[1] +
+                     pcs_charge_phase_current_milliamps[2]);
+    }
   }
 
   if ((RxHeader.StdId == 0x3A4U) && (RxHeader.DLC >= 8U))
@@ -1000,6 +1014,9 @@ void send_mes_100(void)
 
   CAN_TxHeaderTypeDef header = {0};
   uint8_t buffer[8] = {0};
+  PCS_ChargePortProfile chargePortProfile =
+      (pcs_charge_port_profile == (uint8_t)PCS_CHARGE_PORT_EU)
+          ? PCS_CHARGE_PORT_EU : PCS_CHARGE_PORT_US;
 
 
 
@@ -1014,12 +1031,12 @@ void send_mes_100(void)
     {
       // Передаем переменную CHGpwr, которая плавно растет в автомате состояний,
       // и флаг активности "1".
-      PCS_Send_Power_Request_US(CHGpwr, 1);
+      PCS_Send_Power_Request(CHGpwr, 1);
     }
     else
     {
       // В режимах Standby, Fault или Boot жестко просим 0 Ватт и шлем команду "0"
-      PCS_Send_Power_Request_US(0, 0);
+      PCS_Send_Power_Request(0, 0);
     }
 
 
@@ -1127,26 +1144,15 @@ void send_mes_100(void)
 
 
     // =========================================================================
-    // 5. CP Status. Only byte 0 bits 0 and 1 are important to the PCS
+    // 5. CP Status. The port type must match the 0x21D pilot profile.
     // =========================================================================
     header.StdId = 0x25D;
     header.DLC = 8;
-
-
-
-    //buffer[0] = 0xD8; // ИСПРАВЛЕНО: Байт US-порта
-    //buffer[1] = 0x8C;
-    //buffer[2] = 0x01;
-    //buffer[3] = 0xB5;
-
-    buffer[0]=0xD8; //D9 FOR EURO. D8 FOR US. 0=US Tesla , 1=Euro IEC , 2=GB, 3=IEC CCS. Must match PCS type!
-    buffer[1]=0x8C;
-    buffer[2]=0x01;
-    buffer[3]=0xB5;
-    buffer[4]=0x4A;
-    buffer[5]=0xC1;
-    buffer[6]=0x0A;
-    buffer[7]=0xE0;
+    PCS_Encode25D(buffer, chargePortProfile);
+    for (uint8_t i = 0U; i < 8U; i++)
+    {
+      dbg_tx25D[i] = buffer[i];
+    }
     can_queue_frame(&header, buffer);
 
 
@@ -1164,10 +1170,11 @@ void send_mes_100(void)
     }
     can_queue_frame(&header, buffer);
 
-    /* Tested US Type-1/NACS connected profile. 0x60 is not a 60 Hz field. */
+    /* RC6 tests the coherent Euro IEC line-charge profile. */
     header.StdId = 0x21D;
     header.DLC = 8;
-    PCS_Encode21D_US(buffer, ACILim, CHARGE_CABLE_CAPABILITY_A);
+    PCS_Encode21D(buffer, ACILim, CHARGE_CABLE_CAPABILITY_A,
+                  chargePortProfile);
     for (uint8_t i = 0U; i < 8U; i++)
     {
       dbg_tx21D[i] = buffer[i];
@@ -1312,6 +1319,7 @@ int main(void)
     dcdc_w = 1; dcdc_on;
     chg_w = 0; chg_off;
 
+    pcs_charge_port_profile = (uint8_t)PCS_CHARGE_PORT_PROFILE;
     CHGpwr = 0;
     update_charge_setpoints();
     Short2B2 = (PCS_2B2_START_SHORT != 0U);
