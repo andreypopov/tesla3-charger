@@ -7,15 +7,19 @@ int main(void)
 {
   const uint8_t captured204[8] = {0x78, 0x00, 0x00, 0xFF, 0x00, 0x00, 0x00, 0x09};
   const uint8_t charging204[8] = {0x66, 0x04, 0x03, 0xFF, 0x00, 0x00, 0x50, 0x09};
+  const uint8_t stable16A204[8] = {0x66, 0x06, 0x22, 0x22, 0x00, 0x50, 0x50, 0x09};
   const uint8_t captured264[6] = {0xC3, 0x19, 0x80, 0x00, 0x40, 0x01};
   const uint8_t charging264[6] = {0xD2, 0x19, 0x94, 0x12, 0xA0, 0x00};
   const uint8_t rc5Charging264[6] = {0x8A, 0x19, 0x94, 0x11, 0xA0, 0x00};
+  const uint8_t stable16A264[6] = {0x1B, 0x19, 0xA8, 0x22, 0xA0, 0x00};
   const uint8_t charging2B4[5] = {0x6C, 0x31, 0x21, 0x79, 0x00};
   const uint8_t rc5Charging2B4[5] = {0x6B, 0x41, 0x21, 0x76, 0x00};
+  const uint8_t stable16A2B4[5] = {0x6C, 0x79, 0x21, 0x70, 0x00};
   const uint8_t phaseA76C[8] = {0x0C, 0x90, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00};
   const uint8_t phaseC76C[8] = {0x20, 0xFF, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00};
   const uint8_t other76C[8] = {0x6D, 0x85, 0x06, 0xAE, 0x07, 0xFD, 0x08, 0x00};
   const uint8_t rc6AlertMatrix[8] = {0x00, 0x00, 0x00, 0x08, 0x07, 0x00, 0x00, 0x00};
+  const uint8_t stableAlertMatrix[8] = {0x00, 0x00, 0x00, 0x08, 0x02, 0x00, 0x00, 0x00};
   PCS_ChargerStatus charger;
   PCS_ChargeLineStatus line;
   PCS_DcdcRailStatus dcdc;
@@ -38,6 +42,19 @@ int main(void)
   assert(charger.phaseACurrentRequestDeciAmps == 0U);
   assert(charger.phaseBCurrentRequestDeciAmps == 0U);
   assert(charger.phaseCCurrentRequestDeciAmps == 80U);
+  assert(PCS_CalculateAcCurrentRequestDeciAmps(&charger) == 80U);
+
+  PCS_Decode204(stable16A204, &charger);
+  assert(charger.gridConfig == 1U);
+  assert(charger.phaseAEnabled == 0U);
+  assert(charger.phaseBEnabled == 1U && charger.phaseCEnabled == 1U);
+  assert(charger.phaseBCurrentRequestDeciAmps == 80U);
+  assert(charger.phaseCCurrentRequestDeciAmps == 80U);
+  assert(PCS_CalculateAcCurrentRequestDeciAmps(&charger) == 160U);
+
+  /* A multiphase display uses the largest line request, not their sum. */
+  charger.gridConfig = 2U;
+  assert(PCS_CalculateAcCurrentRequestDeciAmps(&charger) == 80U);
 
   PCS_Decode264(captured264, &line);
   assert(line.voltageVolts == 220U);
@@ -56,6 +73,10 @@ int main(void)
   assert(line.voltageVolts == 218U && line.currentAmps == 8U);
   assert(line.powerDeciKw == 17U && line.currentLimitAmps == 16U);
 
+  PCS_Decode264(stable16A264, &line);
+  assert(line.voltageVolts == 214U && line.currentAmps == 16U);
+  assert(line.powerDeciKw == 34U && line.currentLimitAmps == 16U);
+
   PCS_Decode2B4(charging2B4, &dcdc);
   assert(dcdc.lvVoltageRaw == 364U && dcdc.lvVoltageVolts == 14U);
   assert(dcdc.hvVoltageRaw == 2124U && dcdc.hvVoltageVolts == 311U);
@@ -64,6 +85,11 @@ int main(void)
   PCS_Decode2B4(rc5Charging2B4, &dcdc);
   assert(dcdc.lvVoltageVolts == 14U && dcdc.hvVoltageVolts == 312U);
   assert(dcdc.outputCurrentRaw == 118U && dcdc.outputCurrentAmps == 12U);
+
+  PCS_Decode2B4(stable16A2B4, &dcdc);
+  assert(dcdc.lvVoltageRaw == 364U && dcdc.lvVoltageVolts == 14U);
+  assert(dcdc.hvVoltageRaw == 2142U && dcdc.hvVoltageVolts == 314U);
+  assert(dcdc.outputCurrentRaw == 112U && dcdc.outputCurrentAmps == 11U);
 
   assert(PCS_Decode76CChargePhase(phaseA76C, &phase));
   assert(phase.muxId == 0x0CU && phase.phaseIndex == 0U);
@@ -80,6 +106,10 @@ int main(void)
   assert(alerts.chargePowerRationality == 1U);
   assert(alerts.canRationality == 1U);
   assert(alerts.uiMia == 1U);
+
+  PCS_Decode3A4(stableAlertMatrix, &alerts);
+  assert(alerts.vcfrontMia == 1U && alerts.canRationality == 1U);
+  assert(alerts.chargePowerRationality == 0U && alerts.uiMia == 0U);
 
   PCS_Encode22A(data, 319U, true, true);
   assert(data[0] == 0x00U && data[1] == 0x00U);
@@ -138,6 +168,8 @@ int main(void)
   assert(data[3] == 0x00U && data[4] == 0x00U);
   assert(PCS_Encode2B2(data, 3488U, true, false) == 5U);
   assert(data[0] == 0xA0U && data[1] == 0x0DU && data[2] == 0x02U);
+  assert(PCS_Encode2B2(data, 3424U, true, false) == 5U);
+  assert(data[0] == 0x60U && data[1] == 0x0DU && data[2] == 0x02U);
   assert(!PCS_IsChargeOverCurrent(18U, 16U, 2U));
   assert(PCS_IsChargeOverCurrent(19U, 16U, 2U));
   assert(!PCS_IsChargeOverCurrent(32U, 0U, 2U));

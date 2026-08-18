@@ -4,10 +4,11 @@ STM32F103 controller firmware for a 32 A single-phase Tesla Model 3 Power
 Conversion System. The controller communicates over IPC CAN at 500 kbit/s,
 keeps DCDC support active and emulates the charge-port messages needed to
 request AC charging without a physical charge port, proximity input or EVSE
-pilot interface. RC7 keeps the coherent Euro IEC profile and fixes
-`0x333 UI_chargeRequest` for the newer five-byte protocol generation. The
-tested unit also requires the newer five-byte `0x2B2`; those frame lengths are
-protocol-generation details, not proof of PCS region.
+pilot interface. Stable v0.1.0 keeps the coherent Euro IEC profile and the
+five-byte `0x333 UI_chargeRequest` introduced in RC7. Hardware capture `7.txt`
+confirms 214 V, 16.0 A and 3.4 kW charging. The tested unit also requires the
+newer five-byte `0x2B2`; those frame lengths are protocol-generation details,
+not proof of PCS region.
 
 ## Important safety notice
 
@@ -35,9 +36,11 @@ verified at the PCS connector.
   current-limit frames and an AC-voltage-based `0x2B2` power request.
 - Added automatic start after stable AC is confirmed by the PCS.
 - Added CAN/HV/AC/PCS fault states and `0x424` alert diagnostics.
-- Added decoding of the PCS per-phase current request from `0x204`. The
-  `I set/PCS` display now shows the commanded current and the current the PCS
-  actually requests internally (for example `16/8`).
+- Added decoding of the PCS per-branch current request from `0x204`. Stable
+  v0.1.0 fixes `I set/PCS` for the single-phase 32 A hardware: parallel active
+  branches are summed, so the confirmed B=8 A plus C=8 A state displays
+  `16/16`, not the misleading `16/8`. Multiphase diagnostics use the largest
+  per-line request instead of summing different AC lines.
 - The `5.txt` capture proves RC5 really doubled `0x2B2` to 6976 W, while PCS
   still requested and drew exactly 8.0 A. The factor-of-two hypothesis was
   therefore false; RC6 removes that compensation and restores standard
@@ -52,8 +55,12 @@ verified at the PCS connector.
   independently verified fix for newer PCS firmware.
 - RC7 decodes the relevant `0x3A4` alert bits, keeps both matrix pages, and
   stores the complete last `0x424` payload/DLC for SWD diagnostics.
-- Added correct `0x2B4` DCDC rail decoding. The same capture reports 14.2 V and
-  12.1 A, proving DCDC was active even though the legacy `0x224` field was zero.
+- The hardware capture `7.txt` validates the fix end to end: `0x333` has DLC 5,
+  `0x2B2` requests 3424 W, `0x264` reports 214 V / 16.0 A / 3.4 kW, and
+  `UI_MIA` plus `chgPowerRationality` are cleared. DCDC remains active.
+- Added correct `0x2B4` DCDC rail decoding. Earlier capture `4.txt` reports
+  14.2 V / 12.1 A and the final `7.txt` reports 14.22 V / 11.2 A, proving DCDC
+  remains active even though the legacy `0x224` field can be zero.
 - Added a CAN overcurrent guard: a fresh measured current more than 2 A above
   the setpoint immediately disables CHG and latches control state 14. Hardware
   overcurrent protection is still mandatory.
@@ -82,15 +89,15 @@ Generated release files:
 - `build/tesla_charger.elf`
 - `build/tesla_charger.map`
 
-Verified RC7 size (`text=46,824`, `data=128`, `bss=3,616`):
+Verified stable v0.1.0 size (`text=46,948`, `data=128`, `bss=3,616`):
 
-- Flash: 46,952 / 65,536 bytes
+- Flash: 47,076 / 65,536 bytes
 - RAM: 3,744 / 20,480 bytes
 
-Current BIN SHA-256 (RC7):
+Current BIN SHA-256 (v0.1.0):
 
 ```text
-dea6cbcbdd47ca4e2f7a88da3e5d9be6e416299fb9a5c15dd8977a8ad720fea8
+b1aaf0b4da45e559bf077faa5f539da7241bae965c54b5147d38220827419709
 ```
 
 ## Flashing the correct image
@@ -105,7 +112,7 @@ When flashing the BIN directly, use `build/tesla_charger.bin` at address
 `0x08000000` and enable post-write verification. The current firmware is easy
 to identify without trusting the file name:
 
-- the display header is `PCS RC7 EU` and contains `I set/PCS=` and `P/CAN=`;
+- the display header is `PCS 0.1 EU` and contains `I set/PCS=` and `P/CAN=`;
 - CAN `0x22A` has DLC 8 and starts with `00 0B`;
 - CAN `0x2B2` has DLC 5 for the current tested PCS configuration.
 - CAN `0x333` has DLC 5 and equals `04 30 29 07 00`.
@@ -114,7 +121,7 @@ to identify without trusting the file name:
 
 - [`DEBUGGING.md`](DEBUGGING.md): settings, state codes, expected CAN frames,
   first-start procedure and trace-capture checklist.
-- [`output/pdf/tesla_model_3_pcs_can_fix_and_test_guide.pdf`](output/pdf/tesla_model_3_pcs_can_fix_and_test_guide.pdf): earlier Russian report. Per the current test workflow it has deliberately not been updated for RC7; `DEBUGGING.md` is authoritative until the hardware test succeeds.
+- [`output/pdf/tesla_model_3_pcs_can_fix_and_test_guide.pdf`](output/pdf/tesla_model_3_pcs_can_fix_and_test_guide.pdf): final Russian setup, safety, flashing and troubleshooting guide updated after the hardware-confirmed 16 A test.
 
 ## Protocol references
 

@@ -96,6 +96,8 @@ volatile uint8_t pcs_max_ac_power_deci_kw;
 volatile uint8_t pcs_phase_a_request_deci_amps;
 volatile uint8_t pcs_phase_b_request_deci_amps;
 volatile uint8_t pcs_phase_c_request_deci_amps;
+volatile uint8_t pcs_active_charge_branches;
+volatile uint16_t pcs_ac_current_request_deci_amps;
 volatile uint8_t pcs_ac_current_request_amps;
 volatile uint16_t ac_current_raw;
 volatile uint16_t ac_voltage_raw;

@@ -24,6 +24,45 @@ void PCS_Decode204(const uint8_t data[8], PCS_ChargerStatus *status)
   status->hardwareVariant = (data[7] >> 3) & 0x03U;
 }
 
+uint16_t PCS_CalculateAcCurrentRequestDeciAmps(const PCS_ChargerStatus *status)
+{
+  uint16_t summedRequest = 0U;
+  uint8_t maximumRequest = 0U;
+
+  if (status->phaseAEnabled)
+  {
+    summedRequest += status->phaseACurrentRequestDeciAmps;
+    maximumRequest = status->phaseACurrentRequestDeciAmps;
+  }
+
+  if (status->phaseBEnabled)
+  {
+    summedRequest += status->phaseBCurrentRequestDeciAmps;
+    if (status->phaseBCurrentRequestDeciAmps > maximumRequest)
+    {
+      maximumRequest = status->phaseBCurrentRequestDeciAmps;
+    }
+  }
+
+  if (status->phaseCEnabled)
+  {
+    summedRequest += status->phaseCCurrentRequestDeciAmps;
+    if (status->phaseCCurrentRequestDeciAmps > maximumRequest)
+    {
+      maximumRequest = status->phaseCCurrentRequestDeciAmps;
+    }
+  }
+
+  /*
+   * On the 32 A single-phase PCS, 0x204 reports parallel charger branches.
+   * The hardware-confirmed 16 A capture enables B and C at 8 A each, so the
+   * useful line-current diagnostic is their sum. On a multiphase grid each
+   * branch is a separate line, where the largest request is the meaningful
+   * value to compare with a per-line limit.
+   */
+  return (status->gridConfig == 1U) ? summedRequest : maximumRequest;
+}
+
 void PCS_Decode264(const uint8_t data[6], PCS_ChargeLineStatus *status)
 {
   uint16_t lineWord = ((uint16_t)data[2] << 8) | data[1];

@@ -70,6 +70,7 @@ typedef struct
 } PCS_ChargePhaseDebug;
 
 void PCS_Decode204(const uint8_t data[8], PCS_ChargerStatus *status);
+uint16_t PCS_CalculateAcCurrentRequestDeciAmps(const PCS_ChargerStatus *status);
 void PCS_Decode264(const uint8_t data[6], PCS_ChargeLineStatus *status);
 void PCS_Decode2B4(const uint8_t data[5], PCS_DcdcRailStatus *status);
 void PCS_Decode3A4(const uint8_t data[8], PCS_AlertMatrixStatus *status);

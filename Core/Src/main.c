@@ -60,7 +60,7 @@
 #define PCS_CHARGE_PORT_PROFILE    PCS_CHARGE_PORT_EU // Euro IEC, менять только без AC
 #define PCS_2B2_START_SHORT        0U    // Этот PCS требует новый формат DLC 5
 #define AUTO_CHARGE_FROM_AC        1U    // Нет charge port/EVSE: старт по реальному 0x264
-#define FIRMWARE_LABEL             "PCS RC7 EU"
+#define FIRMWARE_LABEL             "PCS 0.1 EU"
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -713,23 +713,12 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *canHandle)
     pcs_phase_a_request_deci_amps = status.phaseACurrentRequestDeciAmps;
     pcs_phase_b_request_deci_amps = status.phaseBCurrentRequestDeciAmps;
     pcs_phase_c_request_deci_amps = status.phaseCCurrentRequestDeciAmps;
-
-    /* This single-phase PCS enables phase C; retain a generic fallback. */
-    if (status.phaseCEnabled)
-    {
-      pcs_ac_current_request_amps =
-          (uint8_t)((status.phaseCCurrentRequestDeciAmps + 5U) / 10U);
-    }
-    else if (status.phaseBEnabled)
-    {
-      pcs_ac_current_request_amps =
-          (uint8_t)((status.phaseBCurrentRequestDeciAmps + 5U) / 10U);
-    }
-    else
-    {
-      pcs_ac_current_request_amps =
-          (uint8_t)((status.phaseACurrentRequestDeciAmps + 5U) / 10U);
-    }
+    pcs_active_charge_branches = status.phaseAEnabled + status.phaseBEnabled +
+                                 status.phaseCEnabled;
+    pcs_ac_current_request_deci_amps =
+        PCS_CalculateAcCurrentRequestDeciAmps(&status);
+    pcs_ac_current_request_amps =
+        (uint8_t)((pcs_ac_current_request_deci_amps + 5U) / 10U);
     pcs_status = status.mainState;
     pin_chg_status = status.pwmEnableLine;
   }
