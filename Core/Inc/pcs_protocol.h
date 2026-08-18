@@ -34,7 +34,7 @@ void PCS_Decode264(const uint8_t data[6], PCS_ChargeLineStatus *status);
 void PCS_Encode13D(uint8_t data[6], uint8_t currentLimitAmps, bool chargeEnabled);
 void PCS_Encode21D_US(uint8_t data[8], uint8_t currentLimitAmps);
 void PCS_Encode22A(uint8_t data[4], uint16_t hvVolts, bool dcdcEnabled, bool chargeEnabled);
-void PCS_Encode23D_US(uint8_t data[2], uint8_t currentLimitAmps);
+void PCS_Encode23D(uint8_t data[4], uint8_t currentLimitAmps, bool chargeEnabled);
 void PCS_Encode333(uint8_t data[4], uint8_t currentLimitAmps);
 uint8_t PCS_Encode2B2(uint8_t data[5], uint16_t powerWatts, bool chargeEnabled, bool shortFrame);
 

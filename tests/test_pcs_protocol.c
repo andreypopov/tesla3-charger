@@ -32,8 +32,13 @@ int main(void)
   assert(PCS_Encode2B2(data, 3000U, true, true) == 3U);
   assert(data[0] == 0xB8U && data[1] == 0x0BU && data[2] == 0x02U);
 
-  PCS_Encode23D_US(data, 16U);
-  assert(data[0] == 0x20U && data[1] == 0x00U);
+  PCS_Encode23D(data, 16U, true);
+  assert(data[0] == 0x05U && data[1] == 0x20U);
+  assert(data[2] == 0xFFU && data[3] == 0x0FU);
+
+  PCS_Encode23D(data, 16U, false);
+  assert(data[0] == 0x0AU && data[1] == 0x20U);
+  assert(data[2] == 0xFFU && data[3] == 0x0FU);
 
   PCS_Encode21D_US(data, 16U);
   assert(data[0] == 0x5DU && data[1] == 0x20U && data[2] == 0x00U && data[3] == 0x10U);
@@ -47,8 +52,8 @@ int main(void)
   assert(data[1] == 0x10U);
   PCS_Encode21D_US(data, 8U);
   assert(data[1] == 0x10U && data[3] == 0x08U);
-  PCS_Encode23D_US(data, 8U);
-  assert(data[0] == 0x10U);
+  PCS_Encode23D(data, 8U, true);
+  assert(data[0] == 0x05U && data[1] == 0x10U);
   PCS_Encode333(data, 8U);
   assert(data[0] == 0x04U && data[1] == 0x08U);
   assert(data[2] == 0x29U && data[3] == 0x07U);

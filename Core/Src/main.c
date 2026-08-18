@@ -1065,12 +1065,15 @@ void send_mes_100(void)
 
 
 
-    /* US charge-port emulation: advertise a real non-zero 16 A limit. */
+    /* Post-2020 CP charge status required by this 32 A single-phase PCS. */
     header.StdId = 0x23D;
-    header.DLC = 2;
-    PCS_Encode23D_US(buffer, ACILim);
-    dbg_tx23D[0] = buffer[0];
-    dbg_tx23D[1] = buffer[1];
+    header.DLC = 4;
+    PCS_Encode23D(buffer, ACILim,
+        controlState == PCS_STATE_RAMP || controlState == PCS_STATE_CHARGING);
+    for (uint8_t i = 0U; i < 4U; i++)
+    {
+      dbg_tx23D[i] = buffer[i];
+    }
     can_queue_frame(&header, buffer);
 
     /* Tested US Type-1/NACS connected profile. 0x60 is not a 60 Hz field. */

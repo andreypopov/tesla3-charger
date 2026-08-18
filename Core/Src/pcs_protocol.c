@@ -74,10 +74,17 @@ void PCS_Encode22A(uint8_t data[4], uint16_t hvVolts, bool dcdcEnabled, bool cha
   data[3] = (uint8_t)((measuredHv >> 4) & 0x7FU);
 }
 
-void PCS_Encode23D_US(uint8_t data[2], uint8_t currentLimitAmps)
+void PCS_Encode23D(uint8_t data[4], uint8_t currentLimitAmps, bool chargeEnabled)
 {
-  data[0] = half_amp_limit(currentLimitAmps);
-  data[1] = 0x00U;
+  /*
+   * Post-2020 CP charge status. The two-byte US frame belongs to older PCS
+   * firmware. On the captured 32 A PCS that layout coincides with CP_MIA and
+   * an 8 A fallback. This layout matches the working 2020 reference trace.
+   */
+  data[0] = chargeEnabled ? 0x05U : 0x0AU;
+  data[1] = half_amp_limit(currentLimitAmps);
+  data[2] = 0xFFU;
+  data[3] = 0x0FU;
 }
 
 void PCS_Encode333(uint8_t data[4], uint8_t currentLimitAmps)

@@ -105,7 +105,7 @@ volatile uint32_t rx424Count;
 volatile uint8_t dbg_tx22A[4];
 volatile uint8_t dbg_tx2B2[5];
 volatile uint8_t dbg_tx2B2_dlc;
-volatile uint8_t dbg_tx23D[2];
+volatile uint8_t dbg_tx23D[4];
 
 
 

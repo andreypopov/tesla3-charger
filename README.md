@@ -20,6 +20,9 @@ verified at the PCS connector.
   not 51 A.
 - Correct US `0x2B2` power-request buffer and DLC handling.
 - Correct `0x22A` DLC, support/charge mode and measured-HV packing.
+- Correct post-2020 `0x23D` to the four-byte charge-status format required by
+  the captured 32 A single-phase PCS; the old two-byte frame left `CP_MIA` set
+  and coincided with an 8 A fallback.
 - Removed the synthetic transmitted `0x2C4` that collided with PCS telemetry.
 - Added consistent 16 A US port emulation using `0x13D`, `0x21D`, `0x23D` and
   `0x25D`.
@@ -46,15 +49,15 @@ Generated release files:
 - `build/tesla_charger.elf`
 - `build/tesla_charger.map`
 
-Verified size (`text=44,456`, `data=128`, `bss=3,464`):
+Verified size (`text=44,544`, `data=128`, `bss=3,464`):
 
-- Flash: 44,584 / 65,536 bytes
+- Flash: 44,672 / 65,536 bytes
 - RAM: 3,592 / 20,480 bytes
 
 Current BIN SHA-256:
 
 ```text
-f0a925b6059145a2b3ba17f505fdc53ad7374d9cdf9acc25b4c3985f88ffab10
+64b52c8c426736cea21e2055601c639d34aee7900f5c6e94046ea3deff1fb602
 ```
 
 ## Flashing the correct image
