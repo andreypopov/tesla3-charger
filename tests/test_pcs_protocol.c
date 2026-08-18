@@ -15,10 +15,12 @@ int main(void)
   const uint8_t phaseA76C[8] = {0x0C, 0x90, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00};
   const uint8_t phaseC76C[8] = {0x20, 0xFF, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00};
   const uint8_t other76C[8] = {0x6D, 0x85, 0x06, 0xAE, 0x07, 0xFD, 0x08, 0x00};
+  const uint8_t rc6AlertMatrix[8] = {0x00, 0x00, 0x00, 0x08, 0x07, 0x00, 0x00, 0x00};
   PCS_ChargerStatus charger;
   PCS_ChargeLineStatus line;
   PCS_DcdcRailStatus dcdc;
   PCS_ChargePhaseDebug phase;
+  PCS_AlertMatrixStatus alerts;
   uint8_t data[8] = {0};
 
   PCS_Decode204(captured204, &charger);
@@ -71,6 +73,14 @@ int main(void)
   assert(phase.currentMilliAmps == 2558U);
   assert(!PCS_Decode76CChargePhase(other76C, &phase));
 
+  PCS_Decode3A4(rc6AlertMatrix, &alerts);
+  assert(alerts.page == 0U);
+  assert(alerts.hvpMia == 0U && alerts.bmsMia == 0U && alerts.cpMia == 0U);
+  assert(alerts.vcfrontMia == 1U);
+  assert(alerts.chargePowerRationality == 1U);
+  assert(alerts.canRationality == 1U);
+  assert(alerts.uiMia == 1U);
+
   PCS_Encode22A(data, 319U, true, true);
   assert(data[0] == 0x00U && data[1] == 0x00U);
   assert(data[2] == 0xFDU && data[3] == 0x13U);
@@ -113,6 +123,7 @@ int main(void)
   PCS_Encode333(data, 48U);
   assert(data[0] == 0x04U && data[1] == 0x30U);
   assert(data[2] == 0x29U && data[3] == 0x07U);
+  assert(data[4] == 0x00U);
 
   assert(PCS_ClampChargeCurrent(8U, 16U) == 8U);
   assert(PCS_ClampChargeCurrent(16U, 16U) == 16U);

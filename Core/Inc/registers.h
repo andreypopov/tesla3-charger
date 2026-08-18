@@ -108,7 +108,15 @@ volatile uint8_t pcs_alert_page;
 volatile uint8_t pcs_last_alert_id;
 volatile uint16_t pcs_alert_can_id;
 volatile uint8_t pcs_alert_rx_error;
+volatile uint8_t pcs_alert_hvp_mia_active;
+volatile uint8_t pcs_alert_bms_mia_active;
+volatile uint8_t pcs_alert_cp_mia_active;
+volatile uint8_t pcs_alert_vcfront_mia_active;
+volatile uint8_t pcs_alert_charge_power_rationality_active;
+volatile uint8_t pcs_alert_can_rationality_active;
+volatile uint8_t pcs_alert_ui_mia_active;
 volatile uint32_t rx3A4Count;
+volatile uint32_t rx3A4PageCount[2];
 volatile uint32_t rx424Count;
 volatile uint32_t rx76CCount;
 volatile uint8_t pcs_debug_mux76c;
@@ -118,6 +126,9 @@ volatile uint16_t pcs_charge_phase_current_milliamps[3];
 volatile uint16_t pcs_charge_phase_current_total_milliamps;
 volatile uint32_t rx76CPhaseCount[3];
 volatile uint8_t dbg_rx76C_phase[3][8];
+volatile uint8_t dbg_rx3A4_page[2][8];
+volatile uint8_t dbg_rx424[8];
+volatile uint8_t dbg_rx424_dlc;
 
 //Last encoded commands. These are useful during SWD debugging.
 volatile uint8_t dbg_tx22A[4];
@@ -126,7 +137,7 @@ volatile uint8_t dbg_tx2B2_dlc;
 volatile uint8_t dbg_tx23D[4];
 volatile uint8_t dbg_tx21D[8];
 volatile uint8_t dbg_tx25D[8];
-volatile uint8_t dbg_tx333[4];
+volatile uint8_t dbg_tx333[5];
 
 
 

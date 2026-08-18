@@ -4,10 +4,10 @@ STM32F103 controller firmware for a 32 A single-phase Tesla Model 3 Power
 Conversion System. The controller communicates over IPC CAN at 500 kbit/s,
 keeps DCDC support active and emulates the charge-port messages needed to
 request AC charging without a physical charge port, proximity input or EVSE
-pilot interface. RC6 defaults to the coherent Euro IEC profile after the RC5
-capture disproved the US-profile power-compensation hypothesis. The tested
-unit requires the newer five-byte `0x2B2`; that frame length is a protocol-
-generation detail, not proof of PCS region.
+pilot interface. RC7 keeps the coherent Euro IEC profile and fixes
+`0x333 UI_chargeRequest` for the newer five-byte protocol generation. The
+tested unit also requires the newer five-byte `0x2B2`; those frame lengths are
+protocol-generation details, not proof of PCS region.
 
 ## Important safety notice
 
@@ -46,6 +46,12 @@ verified at the PCS connector.
   `0x21D` uses the valid EU line-charge pilot value `0x2D`, and `0x25D` uses
   `CP_type = Euro IEC` (`0xD9`). This is the only command-side experiment in
   RC6; all live limits remain 16 A.
+- The `6.txt` capture exposed the concrete remaining protocol error:
+  `0x3A4` reports `CAN rationality` and `UI_MIA` while the controller sends
+  obsolete `0x333` DLC 4. RC7 sends `04 30 29 07 00` with DLC 5, matching the
+  independently verified fix for newer PCS firmware.
+- RC7 decodes the relevant `0x3A4` alert bits, keeps both matrix pages, and
+  stores the complete last `0x424` payload/DLC for SWD diagnostics.
 - Added correct `0x2B4` DCDC rail decoding. The same capture reports 14.2 V and
   12.1 A, proving DCDC was active even though the legacy `0x224` field was zero.
 - Added a CAN overcurrent guard: a fresh measured current more than 2 A above
@@ -76,15 +82,15 @@ Generated release files:
 - `build/tesla_charger.elf`
 - `build/tesla_charger.map`
 
-Verified RC6 size (`text=46,144`, `data=128`, `bss=3,576`):
+Verified RC7 size (`text=46,824`, `data=128`, `bss=3,616`):
 
-- Flash: 46,272 / 65,536 bytes
-- RAM: 3,704 / 20,480 bytes
+- Flash: 46,952 / 65,536 bytes
+- RAM: 3,744 / 20,480 bytes
 
-Current BIN SHA-256 (RC6):
+Current BIN SHA-256 (RC7):
 
 ```text
-19a35cc9d2934e20dffe2e707425189561befb8fbded638c5770d0b787a9fa6b
+dea6cbcbdd47ca4e2f7a88da3e5d9be6e416299fb9a5c15dd8977a8ad720fea8
 ```
 
 ## Flashing the correct image
@@ -99,15 +105,16 @@ When flashing the BIN directly, use `build/tesla_charger.bin` at address
 `0x08000000` and enable post-write verification. The current firmware is easy
 to identify without trusting the file name:
 
-- the display header is `PCS RC6 EU` and contains `I set/PCS=` and `P/CAN=`;
+- the display header is `PCS RC7 EU` and contains `I set/PCS=` and `P/CAN=`;
 - CAN `0x22A` has DLC 8 and starts with `00 0B`;
 - CAN `0x2B2` has DLC 5 for the current tested PCS configuration.
+- CAN `0x333` has DLC 5 and equals `04 30 29 07 00`.
 
 ## Documentation
 
 - [`DEBUGGING.md`](DEBUGGING.md): settings, state codes, expected CAN frames,
   first-start procedure and trace-capture checklist.
-- [`output/pdf/tesla_model_3_pcs_can_fix_and_test_guide.pdf`](output/pdf/tesla_model_3_pcs_can_fix_and_test_guide.pdf): earlier Russian report. Per the current test workflow it has deliberately not been updated for RC6; `DEBUGGING.md` is authoritative until the hardware test succeeds.
+- [`output/pdf/tesla_model_3_pcs_can_fix_and_test_guide.pdf`](output/pdf/tesla_model_3_pcs_can_fix_and_test_guide.pdf): earlier Russian report. Per the current test workflow it has deliberately not been updated for RC7; `DEBUGGING.md` is authoritative until the hardware test succeeds.
 
 ## Protocol references
 

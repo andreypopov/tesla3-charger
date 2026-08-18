@@ -57,10 +57,10 @@
 #define CHARGE_NOMINAL_AC_V        230U  // Подстановка только до первого валидного 0x264
 #define CHARGE_AC_MAX_V            260U  // Защита расчёта от ошибочного значения CAN
 #define CHARGE_PHYSICAL_POWER_MAX_W 4000U // Реальная цель остаётся не выше 16 А
-#define PCS_CHARGE_PORT_PROFILE    PCS_CHARGE_PORT_EU // RC6: Euro IEC, менять только без AC
+#define PCS_CHARGE_PORT_PROFILE    PCS_CHARGE_PORT_EU // Euro IEC, менять только без AC
 #define PCS_2B2_START_SHORT        0U    // Этот PCS требует новый формат DLC 5
 #define AUTO_CHARGE_FROM_AC        1U    // Нет charge port/EVSE: старт по реальному 0x264
-#define FIRMWARE_LABEL             "PCS RC6 EU"
+#define FIRMWARE_LABEL             "PCS RC7 EU"
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -134,7 +134,6 @@ static uint8_t buttonDebounceCount = 0;
 static uint32_t acPresentSinceMs = 0;
 static uint32_t acAbsentSinceMs = 0;
 static _Bool autoStartArmed = true;
-static volatile uint8_t pcsAlertMatrixLast[8] = {0};
 
 
 /* USER CODE END PV */
@@ -761,24 +760,50 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *canHandle)
 
   if ((RxHeader.StdId == 0x3A4U) && (RxHeader.DLC >= 8U))
   {
+    PCS_AlertMatrixStatus alerts;
+
+    PCS_Decode3A4(RxData, &alerts);
     rx3A4Count++;
     lastPcsRxMs = now;
-    pcs_alert_page = RxData[0] & 0x0FU;
-    for (uint8_t i = 0U; i < 8U; i++)
+    pcs_alert_page = alerts.page;
+
+    if (alerts.page < 2U)
     {
-      pcsAlertMatrixLast[i] = RxData[i];
+      rx3A4PageCount[alerts.page]++;
+      for (uint8_t i = 0U; i < 8U; i++)
+      {
+        dbg_rx3A4_page[alerts.page][i] = RxData[i];
+      }
+    }
+
+    if (alerts.page == 0U)
+    {
+      pcs_alert_hvp_mia_active = alerts.hvpMia;
+      pcs_alert_bms_mia_active = alerts.bmsMia;
+      pcs_alert_cp_mia_active = alerts.cpMia;
+      pcs_alert_vcfront_mia_active = alerts.vcfrontMia;
+      pcs_alert_charge_power_rationality_active = alerts.chargePowerRationality;
+      pcs_alert_can_rationality_active = alerts.canRationality;
+      pcs_alert_ui_mia_active = alerts.uiMia;
     }
   }
 
-  if ((RxHeader.StdId == 0x424U) && (RxHeader.DLC >= 5U))
+  if ((RxHeader.StdId == 0x424U) && (RxHeader.DLC >= 1U))
   {
+    uint8_t receivedDlc = (RxHeader.DLC > 8U) ? 8U : (uint8_t)RxHeader.DLC;
+
     rx424Count++;
     lastPcsRxMs = now;
     pcs_last_alert_id = RxData[0];
+    dbg_rx424_dlc = receivedDlc;
+    for (uint8_t i = 0U; i < 8U; i++)
+    {
+      dbg_rx424[i] = (i < receivedDlc) ? RxData[i] : 0U;
+    }
     pcs_alert_matrix[PCS_AlertCnt & (PCS_ALERT_MATRIX_SIZE - 1U)] = RxData[0];
     PCS_AlertCnt = (uint8_t)((PCS_AlertCnt + 1U) & (PCS_ALERT_MATRIX_SIZE - 1U));
 
-    if (RxData[0] == 0x1EU) /* CAN rationality alert */
+    if ((RxData[0] == 0x1EU) && (receivedDlc >= 5U)) /* CAN rationality alert */
     {
       pcs_alert_rx_error = RxData[2] & 0x07U;
       pcs_alert_can_id = ((uint16_t)RxData[4] << 8) | RxData[3];
@@ -1050,9 +1075,9 @@ void send_mes_100(void)
                   // 5. UI charge request message. Can be used as an ac current limit.
                   // =========================================================================
                   header.StdId = 0x333;
-                  header.DLC = 4;
+                  header.DLC = 5;
                   PCS_Encode333(buffer, CHARGE_UI_CAPABILITY_A);
-                  for (uint8_t i = 0U; i < 4U; i++)
+                  for (uint8_t i = 0U; i < 5U; i++)
                   {
                     dbg_tx333[i] = buffer[i];
                   }
@@ -1170,7 +1195,7 @@ void send_mes_100(void)
     }
     can_queue_frame(&header, buffer);
 
-    /* RC6 tests the coherent Euro IEC line-charge profile. */
+    /* Keep the coherent Euro IEC line-charge profile. */
     header.StdId = 0x21D;
     header.DLC = 8;
     PCS_Encode21D(buffer, ACILim, CHARGE_CABLE_CAPABILITY_A,
@@ -1368,7 +1393,7 @@ int main(void)
     ILI9341_WriteString(120, 260, "ERR=", Font_7x10, ILI9341_CYAN, ILI9341_BLACK);
     ILI9341_WriteString(0, 275, "QOV=", Font_7x10, ILI9341_CYAN, ILI9341_BLACK);
     ILI9341_WriteString(120, 275, "MISS=", Font_7x10, ILI9341_CYAN, ILI9341_BLACK);
-    ILI9341_WriteString(0, 290, "264 224 2C4 M H G P AL", Font_7x10, ILI9341_CYAN, ILI9341_BLACK);
+    ILI9341_WriteString(0, 290, "264 224 2C4 M H G P V R C U AL", Font_7x10, ILI9341_CYAN, ILI9341_BLACK);
 
 
 
@@ -1464,7 +1489,11 @@ int main(void)
 		          ILI9341_DrawChar(105,305,pcs_hv_charge_status, Font_7x10, ILI9341_WHITE,ILI9341_BLACK);
 		          ILI9341_DrawChar(126,305,pcs_grid_config, Font_7x10, ILI9341_WHITE,ILI9341_BLACK);
 		          ILI9341_DrawChar(147,305,pcs_pwm_enable_line, Font_7x10, ILI9341_WHITE,ILI9341_BLACK);
-		          ILI9341_DrawChar(182,305,pcs_last_alert_id, Font_7x10, ILI9341_YELLOW,ILI9341_BLACK);
+		          ILI9341_DrawChar(161,305,pcs_alert_vcfront_mia_active, Font_7x10, ILI9341_YELLOW,ILI9341_BLACK);
+		          ILI9341_DrawChar(175,305,pcs_alert_charge_power_rationality_active, Font_7x10, ILI9341_YELLOW,ILI9341_BLACK);
+		          ILI9341_DrawChar(189,305,pcs_alert_can_rationality_active, Font_7x10, ILI9341_YELLOW,ILI9341_BLACK);
+		          ILI9341_DrawChar(203,305,pcs_alert_ui_mia_active, Font_7x10, ILI9341_YELLOW,ILI9341_BLACK);
+		          ILI9341_DrawChar(213,305,pcs_last_alert_id, Font_7x10, ILI9341_YELLOW,ILI9341_BLACK);
 
           RX264=0;RX224=0;RX2C4=0;
 

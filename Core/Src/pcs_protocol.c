@@ -58,6 +58,30 @@ void PCS_Decode2B4(const uint8_t data[5], PCS_DcdcRailStatus *status)
   status->outputCurrentAmps = (uint16_t)((status->outputCurrentRaw + 5U) / 10U);
 }
 
+void PCS_Decode3A4(const uint8_t data[8], PCS_AlertMatrixStatus *status)
+{
+  status->page = data[0] & 0x0FU;
+  status->hvpMia = 0U;
+  status->bmsMia = 0U;
+  status->cpMia = 0U;
+  status->vcfrontMia = 0U;
+  status->chargePowerRationality = 0U;
+  status->canRationality = 0U;
+  status->uiMia = 0U;
+
+  if (status->page == 0U)
+  {
+    /* PCS alert matrix page 0: alerts 21..24 and 29..31. */
+    status->hvpMia = data[3] & 0x01U;
+    status->bmsMia = (data[3] >> 1) & 0x01U;
+    status->cpMia = (data[3] >> 2) & 0x01U;
+    status->vcfrontMia = (data[3] >> 3) & 0x01U;
+    status->chargePowerRationality = data[4] & 0x01U;
+    status->canRationality = (data[4] >> 1) & 0x01U;
+    status->uiMia = (data[4] >> 2) & 0x01U;
+  }
+}
+
 bool PCS_Decode76CChargePhase(const uint8_t data[8], PCS_ChargePhaseDebug *status)
 {
   uint8_t phaseIndex;
@@ -147,12 +171,18 @@ void PCS_Encode25D(uint8_t data[8], PCS_ChargePortProfile profile)
   data[7] = 0xE0U;
 }
 
-void PCS_Encode333(uint8_t data[4], uint8_t currentLimitAmps)
+void PCS_Encode333(uint8_t data[5], uint8_t currentLimitAmps)
 {
+  /*
+   * Newer UI_chargeRequest format. A production trace and the matching PCS
+   * rationality diagnostic both require DLC 5. Keep the already-tested four
+   * data bytes unchanged so this revision isolates the frame-length fix.
+   */
   data[0] = 0x04U;
   data[1] = (currentLimitAmps > 0x7FU) ? 0x7FU : currentLimitAmps;
   data[2] = 0x29U;
   data[3] = 0x07U;
+  data[4] = 0x00U;
 }
 
 uint8_t PCS_Encode2B2(uint8_t data[5], uint16_t powerWatts, bool chargeEnabled, bool shortFrame)
